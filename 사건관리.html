@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수사8팀 사건관리</title>
+<style>
+:root{
+  --bg:#eef1f6; --panel:#ffffff; --panel2:#f7f9fc; --line:#dde3ec;
+  --text:#141c28; --muted:#67748a; --accent:#1c4f9c; --accent-soft:#e7eefa;
+  --ok:#15803d; --ok-soft:#e6f4ea; --warn:#b45309; --warn-soft:#fdf1e0; --bad:#b91c1c; --bad-soft:#fbe9e9;
+  --radius:10px; --shadow:0 1px 2px rgba(20,28,40,.06), 0 4px 14px rgba(20,28,40,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:"Pretendard","Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",system-ui,sans-serif;
+  font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+
+/* ── 레이아웃 ── */
+.top{
+  background:var(--accent); color:#fff; padding:0 20px;
+  display:flex; align-items:center; gap:18px; height:56px;
+  position:sticky; top:0; z-index:50; box-shadow:0 2px 10px rgba(28,79,156,.25);
+}
+.brand{font-weight:700; font-size:16px; letter-spacing:-.3px; white-space:nowrap}
+.brand small{display:block; font-weight:400; font-size:11px; opacity:.75; letter-spacing:0}
+.tabs{display:flex; gap:2px; margin-left:8px; flex:1}
+.tab{
+  background:transparent; border:0; color:#cfdcf2; padding:8px 14px; border-radius:7px;
+  cursor:pointer; font-size:13.5px; font-weight:500;
+}
+.tab:hover{background:rgba(255,255,255,.12); color:#fff}
+.tab.on{background:#fff; color:var(--accent); font-weight:700}
+.top .util{display:flex; gap:8px; align-items:center}
+.top .util button{
+  background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.22); color:#fff;
+  padding:6px 12px; border-radius:7px; cursor:pointer; font-size:12.5px;
+}
+.top .util button:hover{background:rgba(255,255,255,.26)}
+.wrap{max-width:1240px; margin:0 auto; padding:20px}
+
+/* ── 공통 ── */
+.card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+.card-h{padding:13px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px}
+.card-h h2{margin:0; font-size:14.5px; font-weight:700; letter-spacing:-.2px}
+.card-h .sub{color:var(--muted); font-size:12px; font-weight:400}
+.card-b{padding:16px}
+.grid{display:grid; gap:14px}
+.muted{color:var(--muted)}
+.right{margin-left:auto}
+.btn{
+  background:var(--accent); color:#fff; border:0; padding:8px 15px; border-radius:7px;
+  cursor:pointer; font-weight:600; font-size:13px;
+}
+.btn:hover{filter:brightness(1.08)}
+.btn.ghost{background:var(--panel2); color:var(--text); border:1px solid var(--line); font-weight:500}
+.btn.ghost:hover{background:#eef2f8}
+.btn.sm{padding:5px 11px; font-size:12.5px}
+.btn.danger{background:var(--bad)}
+input[type=text],input[type=date],input[type=number],select,textarea{
+  background:#fff; border:1px solid var(--line); border-radius:7px; padding:7px 10px; width:100%;
+}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft); border-color:var(--accent)}
+textarea{resize:vertical; min-height:70px}
+label.f{display:block; margin-bottom:12px}
+label.f > span{display:block; font-size:12px; color:var(--muted); margin-bottom:4px; font-weight:600}
+table{width:100%; border-collapse:collapse}
+th,td{padding:9px 10px; text-align:left; border-bottom:1px solid var(--line); font-size:13px; vertical-align:middle}
+th{background:var(--panel2); color:var(--muted); font-size:11.5px; font-weight:700; letter-spacing:.2px; white-space:nowrap}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--accent-soft)}
+.pill{display:inline-block; padding:2px 8px; border-radius:20px; font-size:11.5px; font-weight:700; white-space:nowrap}
+.pill.ok{background:var(--ok-soft); color:var(--ok)}
+.pill.warn{background:var(--warn-soft); color:var(--warn)}
+.pill.bad{background:var(--bad-soft); color:var(--bad)}
+.pill.neutral{background:var(--panel2); color:var(--muted); border:1px solid var(--line)}
+.pill.accent{background:var(--accent-soft); color:var(--accent)}
+.empty{padding:34px; text-align:center; color:var(--muted); font-size:13px}
+
+/* ── 대시보드 ── */
+.kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:14px}
+.kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; box-shadow:var(--shadow)}
+.kpi .n{font-size:26px; font-weight:800; letter-spacing:-1px; line-height:1.2}
+.kpi .l{font-size:12px; color:var(--muted); font-weight:600}
+.members{display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr)); gap:12px}
+.mcard{border:1px solid var(--line); border-radius:9px; padding:12px 13px; background:var(--panel2)}
+.mcard.lead{border-color:var(--accent); background:var(--accent-soft)}
+.mrow{display:flex; align-items:baseline; gap:7px}
+.mrank{font-size:11.5px; color:var(--muted); font-weight:600}
+.mname{font-weight:700; font-size:14.5px}
+.mcount{margin-left:auto; font-size:20px; font-weight:800; letter-spacing:-.5px}
+.mbar{height:7px; border-radius:4px; background:#dfe5ef; margin:9px 0 7px; overflow:hidden}
+.mbar i{display:block; height:100%; border-radius:4px}
+.mmeta{font-size:11.5px; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap}
+.alert-row{display:flex; align-items:center; gap:10px; padding:9px 12px; border-bottom:1px solid var(--line); cursor:pointer; font-size:13px}
+.alert-row:last-child{border-bottom:0}
+.alert-row:hover{background:var(--accent-soft)}
+.alert-row .txt{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+/* ── 진행 트래커 ── */
+.track{display:flex; flex-direction:column; gap:0}
+.step{display:flex; gap:12px; align-items:flex-start; padding:9px 10px; border-radius:8px; position:relative}
+.step:hover{background:var(--panel2)}
+.step .dot{
+  width:26px; height:26px; border-radius:50%; flex:none; display:grid; place-items:center;
+  font-size:11.5px; font-weight:700; border:2px solid var(--line); background:#fff; color:var(--muted);
+  cursor:pointer; z-index:2;
+}
+.step.done .dot{background:var(--ok); border-color:var(--ok); color:#fff}
+.step.cur .dot{background:var(--accent); border-color:var(--accent); color:#fff; box-shadow:0 0 0 4px var(--accent-soft)}
+.step:not(:last-child)::after{
+  content:""; position:absolute; left:22px; top:33px; bottom:-4px; width:2px; background:var(--line);
+}
+.step.done:not(:last-child)::after{background:var(--ok)}
+.step.done.cur:not(:last-child)::after{background:var(--line)}
+.step .body{flex:1; min-width:0}
+.step .nm{font-weight:600; font-size:13.5px}
+.step.cur .nm{color:var(--accent); font-weight:800}
+.step .dt{font-size:11.5px; color:var(--muted)}
+.step .act{opacity:0; transition:opacity .12s}
+.step:hover .act{opacity:1}
+
+/* ── 팀장 의견 ── */
+.note{border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:7px; padding:10px 12px; margin-bottom:9px; background:var(--panel2)}
+.note .nh{display:flex; align-items:center; gap:8px; margin-bottom:5px; font-size:11.5px; color:var(--muted)}
+.note .nb{white-space:pre-wrap; font-size:13px}
+
+/* ── 모달 ── */
+.mask{position:fixed; inset:0; background:rgba(15,22,35,.5); display:grid; place-items:center; padding:20px; z-index:100}
+.modal{background:var(--panel); border-radius:12px; width:100%; max-width:560px; max-height:90vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal.wide{max-width:920px}
+.modal-h{padding:15px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; position:sticky; top:0; background:var(--panel); z-index:2}
+.modal-h h3{margin:0; font-size:15.5px; font-weight:700}
+.modal-b{padding:18px}
+.modal-f{padding:13px 18px; border-top:1px solid var(--line); display:flex; gap:8px; justify-content:flex-end; position:sticky; bottom:0; background:var(--panel)}
+.two{display:grid; grid-template-columns:1fr 1fr; gap:0 14px}
+.three{display:grid; grid-template-columns:1fr 1fr 1fr; gap:0 14px}
+
+/* ── 필터바 ── */
+.filters{display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--panel2)}
+.filters select,.filters input{width:auto; min-width:120px}
+.filters input[type=text]{min-width:200px}
+
+/* ── 배너 ── */
+.banner{
+  background:var(--warn-soft); border:1px solid #f0d3a6; color:#7c4a08; padding:10px 14px;
+  border-radius:9px; margin-bottom:14px; display:flex; align-items:center; gap:10px; font-size:13px;
+}
+
+/* ── 주간보고(인쇄) ── */
+.report h3{margin:20px 0 8px; font-size:14px; border-bottom:2px solid var(--text); padding-bottom:5px}
+.report table{margin-bottom:6px}
+@media print{
+  .top,.filters,.no-print,.btn{display:none !important}
+  body{background:#fff; font-size:11px}
+  .wrap{max-width:none; padding:0}
+  .card{border:0; box-shadow:none}
+  th,td{padding:4px 6px; font-size:10.5px}
+}
+@media (max-width:900px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .two,.three{grid-template-columns:1fr}
+  .tabs{overflow-x:auto}
+}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand">부산남부경찰서 수사8팀<small>사건 진행관리 · 팀원 관리</small></div>
+  <nav class="tabs" id="tabs"></nav>
+  <div class="util">
+    <button id="btn-new">+ 사건 접수</button>
+    <button id="btn-backup">백업</button>
+  </div>
+</div>
+<div class="wrap" id="app"></div>
+<div id="modal-root"></div>
+<input type="file" id="file-import" accept=".json,application/json" style="display:none">
+<script>
+/* ══════════════════════════════════════════════════════════════
+   부산남부경찰서 수사8팀 사건관리
+   - 모든 데이터는 이 PC의 브라우저 저장소에만 보관됩니다(외부 전송 없음).
+   - 정기적으로 [백업]으로 파일을 내려받아 보관하세요.
+   ══════════════════════════════════════════════════════════════ */
+
+const KEY = 'nambu-team8-case-mgmt-v1';
+
+/* 수사 진행 11단계 */
+const STAGES = [
+  '접수',
+  '사건분석',
+  '고소인(진정인) 조사',
+  '사건재분석',
+  '영장신청 / 피의자 출석요구',
+  '피의자 조사',
+  '사건종합검토',
+  '추가 수사',
+  '수사결과보고서 작성',
+  '사건당사자 통지',
+  '종결'
+];
+const LAST = STAGES.length - 1;              // 종결 단계 index
+const REVIEW_STAGES = [1, 3, 6];             // 팀장 의견 단계: 사건분석 / 사건재분석 / 사건종합검토
+const CASE_TYPES = ['고소', '고발', '진정', '인지', '송치전이송', '기타'];
+
+/* ── 상태 ── */
+let db = null;
+let view = 'dash';
+let openCaseId = null;
+let filters = { owner:'', stage:'', status:'open', q:'' };
+
+/* ── 유틸 ── */
+const $  = (s, r=document) => r.querySelector(s);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = () => new Date().toISOString().slice(0, 10);
+function daysBetween(a, b){ if(!a||!b) return null; return Math.round((new Date(b) - new Date(a)) / 86400000); }
+function daysSince(d){ return d ? daysBetween(d, today()) : null; }
+function fmt(d){ return d ? d.replace(/-/g, '.').slice(2) : '-'; }
+
+/* ── 저장 / 로드 ── */
+function defaultDb(){
+  const mk = (rank, name, lead=false) => ({ id:uid(), rank, name, lead, active:true });
+  return {
+    version: 1,
+    members: [
+      mk('경감', '팀장', true),
+      mk('경위', '송당호'),
+      mk('경사', '배지혜'),
+      mk('경사', '이종윤'),
+      mk('경장', '이민화'),
+      mk('순경', '김태안')
+    ],
+    cases: [],
+    settings: { capTarget:10, capWarn:9, stallDays:14, dueSoonDays:7 },
+    lastBackupAt: null
+  };
+}
+function load(){
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(raw){ db = JSON.parse(raw); }
+  }catch(e){ console.warn('저장소 읽기 실패', e); }
+  if(!db || !db.members) db = defaultDb();
+  db.settings = Object.assign(defaultDb().settings, db.settings || {});
+  return db;
+}
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(db)); }
+  catch(e){ alert('저장에 실패했습니다. 브라우저 저장소 용량 또는 권한을 확인해 주세요.\n\n' + e.message); }
+}
+
+/* ── 도메인 로직 ── */
+function newCase(){
+  return {
+    id: uid(),
+    caseNo: '',
+    charge: '',
+    type: '고소',
+    receivedAt: today(),
+    ownerId: db.members[0].id,
+    complainant: '',
+    suspect: '',
+    dueAt: '',
+    priority: 'normal',
+    stageIndex: 0,
+    stageEnteredAt: today(),
+    stages: STAGES.map(() => ({ done:false, date:'' })),
+    notes: [],          // 팀장 의견
+    memo: '',
+    createdAt: today(),
+    updatedAt: today()
+  };
+}
+const isClosed  = c => c.stageIndex >= LAST && c.stages[LAST].done;
+const openCases = () => db.cases.filter(c => !isClosed(c));
+const member    = id => db.members.find(m => m.id === id) || { rank:'', name:'(미지정)' };
+const memberLabel = id => { const m = member(id); return (m.rank ? m.rank + ' ' : '') + m.name; };
+const caseById  = id => db.cases.find(c => c.id === id);
+const loadOf    = id => openCases().filter(c => c.ownerId === id).length;
+
+function loadLevel(n){
+  const s = db.settings;
+  if(n > s.capTarget) return 'bad';     // 11건 이상
+  if(n >= s.capWarn)  return 'warn';    // 9~10건
+  return 'ok';
+}
+function stallDays(c){ return isClosed(c) ? null : daysSince(c.stageEnteredAt); }
+function dueDays(c){ return (isClosed(c) || !c.dueAt) ? null : daysBetween(today(), c.dueAt); }
+
+/* 사건별 경보 목록 */
+function caseAlerts(c){
+  const out = [], s = db.settings;
+  if(isClosed(c)) return out;
+  const dd = dueDays(c);
+  if(dd !== null && dd < 0)                out.push({ lv:'bad',  txt:`기한 ${-dd}일 경과` });
+  else if(dd !== null && dd <= s.dueSoonDays) out.push({ lv:'warn', txt:`기한 D-${dd}` });
+  const st = stallDays(c);
+  if(st !== null && st >= s.stallDays)      out.push({ lv:'bad',  txt:`${STAGES[c.stageIndex]} 단계 ${st}일 정체` });
+  const unack = c.notes.filter(n => !n.ack).length;
+  if(unack)                                 out.push({ lv:'warn', txt:`팀장 의견 미확인 ${unack}건` });
+  return out;
+}
+function allAlerts(){
+  const rows = [];
+  openCases().forEach(c => caseAlerts(c).forEach(a => rows.push({ ...a, c })));
+  const rank = { bad:0, warn:1 };
+  return rows.sort((x, y) => rank[x.lv] - rank[y.lv]);
+}
+
+/* 단계 이동 */
+/* 단계 idx를 '현재 진행 중'으로 설정 — 앞 단계는 완료, 뒤 단계는 대기.
+   마지막(종결) 단계만 선택 즉시 완료 처리된다. */
+function setStage(c, idx){
+  for(let i = 0; i < idx; i++){
+    if(!c.stages[i].done){ c.stages[i].done = true; c.stages[i].date = today(); }
+  }
+  for(let i = idx; i < STAGES.length; i++){
+    const done = (i === idx && idx === LAST);
+    c.stages[i].done = done;
+    c.stages[i].date = done ? today() : '';
+  }
+  if(c.stageIndex !== idx) c.stageEnteredAt = today();
+  c.stageIndex = idx;
+  c.updatedAt = today();
+  save();
+}
+function undoStage(c, idx){
+  setStage(c, idx);
+}
+
+/* ══════════ 렌더링 ══════════ */
+const TABS = [
+  { id:'dash',    label:'대시보드' },
+  { id:'list',    label:'사건 목록' },
+  { id:'report',  label:'주간 보고' },
+  { id:'members', label:'팀원 · 설정' }
+];
+
+function renderTabs(){
+  $('#tabs').innerHTML = TABS.map(t =>
+    `<button class="tab ${view === t.id ? 'on' : ''}" data-tab="${t.id}">${t.label}</button>`
+  ).join('');
+}
+
+function render(){
+  renderTabs();
+  const app = $('#app');
+  if(view === 'dash')         app.innerHTML = viewDash();
+  else if(view === 'list')    app.innerHTML = viewList();
+  else if(view === 'report')  app.innerHTML = viewReport();
+  else                        app.innerHTML = viewMembers();
+  if(openCaseId) renderDetail();
+}
+
+/* ── 백업 안내 배너 ── */
+function backupBanner(){
+  const d = daysSince(db.lastBackupAt);
+  if(db.cases.length === 0) return '';
+  if(db.lastBackupAt && d < 7) return '';
+  const msg = db.lastBackupAt
+    ? `마지막 백업 후 ${d}일 지났습니다.`
+    : '아직 백업한 적이 없습니다.';
+  return `<div class="banner no-print">
+    <b>백업 안내</b>
+    <span>${msg} 데이터는 이 브라우저에만 저장되므로, 주 1회 백업 파일을 내려받아 보관하세요.</span>
+    <button class="btn sm right" data-act="backup">지금 백업</button>
+  </div>`;
+}
+
+/* ══════════ 대시보드 ══════════ */
+function viewDash(){
+  const open = openCases();
+  const closedThisMonth = db.cases.filter(c => isClosed(c) && (c.stages[LAST].date || '').slice(0, 7) === today().slice(0, 7)).length;
+  const alerts = allAlerts();
+  const over = db.members.filter(m => m.active && loadOf(m.id) > db.settings.capTarget).length;
+
+  const kpis = `
+  <div class="kpis">
+    <div class="kpi"><div class="n">${open.length}</div><div class="l">진행 중 사건</div></div>
+    <div class="kpi"><div class="n" style="color:${over ? 'var(--bad)' : 'var(--ok)'}">${over}</div><div class="l">10건 초과 인원</div></div>
+    <div class="kpi"><div class="n" style="color:${alerts.length ? 'var(--warn)' : 'var(--ok)'}">${alerts.length}</div><div class="l">점검 필요 항목</div></div>
+    <div class="kpi"><div class="n">${closedThisMonth}</div><div class="l">이번 달 종결</div></div>
+  </div>`;
+
+  const cards = db.members.filter(m => m.active).map(m => {
+    const n = loadOf(m.id), lv = loadLevel(n);
+    const color = lv === 'bad' ? 'var(--bad)' : lv === 'warn' ? 'var(--warn)' : 'var(--ok)';
+    const pct = Math.min(100, Math.round(n / db.settings.capTarget * 100));
+    const mine = openCases().filter(c => c.ownerId === m.id);
+    const stalled = mine.filter(c => (stallDays(c) ?? 0) >= db.settings.stallDays).length;
+    const due = mine.filter(c => { const d = dueDays(c); return d !== null && d <= db.settings.dueSoonDays; }).length;
+    return `<div class="mcard ${m.lead ? 'lead' : ''}" data-owner="${m.id}">
+      <div class="mrow">
+        <span class="mrank">${esc(m.rank)}</span><span class="mname">${esc(m.name)}</span>
+        <span class="mcount" style="color:${color}">${n}<span style="font-size:12px;color:var(--muted);font-weight:600">/${db.settings.capTarget}</span></span>
+      </div>
+      <div class="mbar"><i style="width:${pct}%;background:${color}"></i></div>
+      <div class="mmeta">
+        ${stalled ? `<span class="pill bad">정체 ${stalled}</span>` : ''}
+        ${due ? `<span class="pill warn">기한임박 ${due}</span>` : ''}
+        ${(!stalled && !due) ? `<span class="pill ok">이상 없음</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const alertRows = alerts.length ? alerts.slice(0, 25).map(a => `
+    <div class="alert-row" data-open="${a.c.id}">
+      <span class="pill ${a.lv}">${a.lv === 'bad' ? '긴급' : '주의'}</span>
+      <span class="txt"><b>${esc(a.c.caseNo || '(사건번호 미입력)')}</b> · ${esc(a.c.charge || '죄명 미입력')}
+        <span class="muted">— ${esc(memberLabel(a.c.ownerId))}</span></span>
+      <span class="muted" style="font-size:12px;white-space:nowrap">${esc(a.txt)}</span>
+    </div>`).join('')
+    : '<div class="empty">점검이 필요한 사건이 없습니다.</div>';
+
+  /* 단계별 분포 */
+  const dist = STAGES.map((s, i) => ({ s, i, n: open.filter(c => c.stageIndex === i).length }));
+  const maxN = Math.max(1, ...dist.map(d => d.n));
+  const distRows = dist.filter(d => d.n > 0).map(d => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;cursor:pointer" data-stage="${d.i}">
+      <span style="width:180px;font-size:12.5px;flex:none">${d.i + 1}. ${esc(d.s)}</span>
+      <span style="flex:1;height:16px;background:#e6ebf3;border-radius:4px;overflow:hidden">
+        <i style="display:block;height:100%;width:${Math.round(d.n / maxN * 100)}%;background:var(--accent)"></i></span>
+      <b style="width:26px;text-align:right;font-size:13px">${d.n}</b>
+    </div>`).join('') || '<div class="empty">진행 중인 사건이 없습니다.</div>';
+
+  return backupBanner() + kpis + `
+  <div class="grid" style="grid-template-columns:1fr 1fr">
+    <div class="card">
+      <div class="card-h"><h2>팀원별 보유 사건</h2><span class="sub">목표 ${db.settings.capTarget}건 이하</span></div>
+      <div class="card-b"><div class="members">${cards}</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>단계별 분포</h2><span class="sub">진행 중 ${open.length}건</span></div>
+      <div class="card-b">${distRows}</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="card-h"><h2>점검 필요 사건</h2><span class="sub">기한 임박 · 단계 정체 ${db.settings.stallDays}일↑ · 팀장 의견 미확인</span></div>
+    ${alertRows}
+  </div>`;
+}
+
+/* ══════════ 사건 목록 ══════════ */
+function filtered(){
+  const q = filters.q.trim().toLowerCase();
+  return db.cases.filter(c => {
+    if(filters.status === 'open'   && isClosed(c)) return false;
+    if(filters.status === 'closed' && !isClosed(c)) return false;
+    if(filters.owner && c.ownerId !== filters.owner) return false;
+    if(filters.stage !== '' && c.stageIndex !== +filters.stage) return false;
+    if(q && !`${c.caseNo} ${c.charge} ${c.complainant} ${c.suspect} ${c.memo}`.toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a, b) => {
+    const ra = caseAlerts(a).some(x => x.lv === 'bad') ? 0 : 1;
+    const rb = caseAlerts(b).some(x => x.lv === 'bad') ? 0 : 1;
+    if(ra !== rb) return ra - rb;
+    return (a.dueAt || '9999') < (b.dueAt || '9999') ? -1 : 1;
+  });
+}
+function viewList(){
+  const rows = filtered();
+  const opts = (arr, sel, val, lab) => arr.map((x, i) =>
+    `<option value="${val(x, i)}" ${String(val(x, i)) === String(sel) ? 'selected' : ''}>${esc(lab(x, i))}</option>`).join('');
+
+  const body = rows.length ? rows.map(c => {
+    const al = caseAlerts(c);
+    const dd = dueDays(c), st = stallDays(c);
+    const pct = Math.round(c.stages.filter(s => s.done).length / STAGES.length * 100);
+    return `<tr data-open="${c.id}">
+      <td><b>${esc(c.caseNo || '-')}</b><div class="muted" style="font-size:11.5px">${esc(c.type)} · 접수 ${fmt(c.receivedAt)}</div></td>
+      <td>${esc(c.charge || '-')}${c.priority === 'high' ? ' <span class="pill bad">중요</span>' : ''}</td>
+      <td>${esc(memberLabel(c.ownerId))}</td>
+      <td style="min-width:190px">
+        <div style="font-size:12.5px;font-weight:600">${c.stageIndex + 1}. ${esc(STAGES[c.stageIndex])}</div>
+        <span style="display:block;height:5px;background:#e6ebf3;border-radius:3px;margin-top:4px;overflow:hidden">
+          <i style="display:block;height:100%;width:${pct}%;background:${isClosed(c) ? 'var(--ok)' : 'var(--accent)'}"></i></span>
+      </td>
+      <td>${st === null ? '-' : `<span class="pill ${st >= db.settings.stallDays ? 'bad' : 'neutral'}">${st}일</span>`}</td>
+      <td>${c.dueAt ? `<span class="pill ${dd === null ? 'neutral' : dd < 0 ? 'bad' : dd <= db.settings.dueSoonDays ? 'warn' : 'neutral'}">${fmt(c.dueAt)}${dd === null ? '' : dd < 0 ? ` (${-dd}일↑)` : ` (D-${dd})`}</span>` : '<span class="muted">-</span>'}</td>
+      <td>${isClosed(c) ? '<span class="pill ok">종결</span>' : al.length ? `<span class="pill ${al[0].lv}">${esc(al[0].txt)}</span>` : '<span class="pill neutral">정상</span>'}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7"><div class="empty">해당하는 사건이 없습니다.</div></td></tr>`;
+
+  return backupBanner() + `<div class="card">
+    <div class="filters no-print">
+      <select data-f="status">
+        <option value="open"   ${filters.status === 'open' ? 'selected' : ''}>진행 중</option>
+        <option value="closed" ${filters.status === 'closed' ? 'selected' : ''}>종결</option>
+        <option value=""       ${filters.status === '' ? 'selected' : ''}>전체</option>
+      </select>
+      <select data-f="owner"><option value="">담당자 전체</option>
+        ${opts(db.members.filter(m => m.active), filters.owner, m => m.id, m => `${m.rank} ${m.name} (${loadOf(m.id)})`)}
+      </select>
+      <select data-f="stage"><option value="">단계 전체</option>
+        ${opts(STAGES, filters.stage, (s, i) => i, (s, i) => `${i + 1}. ${s}`)}
+      </select>
+      <input type="text" data-f="q" placeholder="사건번호 · 죄명 · 당사자 · 메모 검색" value="${esc(filters.q)}">
+      <span class="right muted">${rows.length}건</span>
+    </div>
+    <table>
+      <thead><tr><th>사건번호</th><th>죄명</th><th>담당</th><th>진행 단계</th><th>단계경과</th><th>기한</th><th>상태</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
+}
+
+/* ══════════ 사건 상세 ══════════ */
+function renderDetail(){
+  const c = caseById(openCaseId);
+  if(!c){ openCaseId = null; $('#modal-root').innerHTML = ''; return; }
+
+  const steps = STAGES.map((s, i) => {
+    const st = c.stages[i];
+    const cur = c.stageIndex === i && !isClosed(c);
+    const review = REVIEW_STAGES.includes(i);
+    const notes = c.notes.filter(n => n.stage === i);
+    return `<div class="step ${st.done ? 'done' : ''} ${cur ? 'cur' : ''}">
+      <span class="dot" data-stage-set="${i}" title="이 단계를 현재 진행 단계로 설정">${st.done && !cur ? '✓' : i + 1}</span>
+      <div class="body">
+        <div class="nm">${esc(s)}${review ? ' <span class="pill accent" style="font-weight:600">팀장 검토</span>' : ''}</div>
+        <div class="dt">${cur ? `진행 중 · 착수 ${fmt(c.stageEnteredAt)} (${stallDays(c)}일 경과)`
+                              : st.done ? `완료 ${fmt(st.date)}` : '대기'}</div>
+        ${notes.map(n => `<div class="note" style="margin-top:7px">
+            <div class="nh"><b style="color:var(--accent)">팀장 의견</b><span>${fmt(n.at)}</span>
+              ${n.ack ? `<span class="pill ok">확인 ${fmt(n.ackAt)}</span>`
+                      : `<button class="btn ghost sm" data-ack="${n.id}">확인 처리</button>`}
+              <button class="btn ghost sm right" data-note-del="${n.id}">삭제</button></div>
+            <div class="nb">${esc(n.text)}</div></div>`).join('')}
+        ${review ? `<button class="btn ghost sm act" style="margin-top:6px" data-note-add="${i}">＋ 팀장 의견 작성</button>` : ''}
+      </div>
+      ${st.done && i > 0 && !cur ? `<button class="btn ghost sm act" data-stage-undo="${i}">이 단계로 되돌리기</button>` : ''}
+    </div>`;
+  }).join('');
+
+  const al = caseAlerts(c);
+  const dd = dueDays(c);
+
+  $('#modal-root').innerHTML = `<div class="mask" data-close-mask>
+    <div class="modal wide" role="dialog">
+      <div class="modal-h">
+        <h3>${esc(c.caseNo || '(사건번호 미입력)')}</h3>
+        <span class="pill ${isClosed(c) ? 'ok' : 'accent'}">${isClosed(c) ? '종결' : STAGES[c.stageIndex]}</span>
+        ${c.priority === 'high' ? '<span class="pill bad">중요</span>' : ''}
+        <button class="btn ghost sm right" data-edit="${c.id}">수정</button>
+        <button class="btn ghost sm" data-close>닫기</button>
+      </div>
+      <div class="modal-b">
+        ${al.length ? `<div style="margin-bottom:14px;display:flex;gap:6px;flex-wrap:wrap">
+          ${al.map(a => `<span class="pill ${a.lv}">${esc(a.txt)}</span>`).join('')}</div>` : ''}
+        <div class="grid" style="grid-template-columns:300px 1fr">
+          <div>
+            <div class="card" style="box-shadow:none">
+              <div class="card-b" style="padding:13px">
+                ${[
+                  ['죄명', esc(c.charge || '-')],
+                  ['사건 구분', esc(c.type)],
+                  ['담당', esc(memberLabel(c.ownerId))],
+                  ['접수일', fmt(c.receivedAt) + (daysSince(c.receivedAt) !== null ? ` <span class="muted">(${daysSince(c.receivedAt)}일 경과)</span>` : '')],
+                  ['처리기한', c.dueAt ? fmt(c.dueAt) + (dd === null ? '' : dd < 0 ? ` <span style="color:var(--bad)">(${-dd}일 경과)</span>` : ` <span class="muted">(D-${dd})</span>`) : '-'],
+                  ['고소인/진정인', esc(c.complainant || '-')],
+                  ['피의자', esc(c.suspect || '-')]
+                ].map(([k, v]) => `<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px">
+                    <span class="muted" style="width:88px;flex:none;font-size:12px;font-weight:600">${k}</span><span>${v}</span></div>`).join('')}
+              </div>
+            </div>
+            <div style="margin-top:12px">
+              <div class="muted" style="font-size:12px;font-weight:700;margin-bottom:5px">수사 메모</div>
+              <textarea data-memo placeholder="수사 상황, 지시사항, 특이사항을 기록하세요.">${esc(c.memo)}</textarea>
+              <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn sm" data-memo-save>메모 저장</button>
+                <button class="btn ghost sm right" data-del="${c.id}">사건 삭제</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="muted" style="font-size:12px;font-weight:700;margin-bottom:8px">
+              진행 단계 <span style="font-weight:400">— 번호를 클릭하면 그 단계를 <b>현재 진행 단계</b>로 설정합니다 (앞 단계는 완료 처리)</span></div>
+            <div class="track">${steps}</div>
+          </div>
+        </div>
+      </div>
+    </div></div>`;
+}
+
+/* ══════════ 사건 등록/수정 폼 ══════════ */
+function renderForm(c, isNew){
+  const opt = (arr, sel, v, l) => arr.map((x, i) =>
+    `<option value="${v(x, i)}" ${String(v(x, i)) === String(sel) ? 'selected' : ''}>${esc(l(x, i))}</option>`).join('');
+  $('#modal-root').innerHTML = `<div class="mask" data-close-mask>
+    <div class="modal">
+      <div class="modal-h"><h3>${isNew ? '사건 접수' : '사건 수정'}</h3>
+        <button class="btn ghost sm right" data-close>닫기</button></div>
+      <div class="modal-b">
+        <div class="two">
+          <label class="f"><span>사건번호</span><input type="text" data-k="caseNo" value="${esc(c.caseNo)}" placeholder="2026-001234"></label>
+          <label class="f"><span>사건 구분</span><select data-k="type">${opt(CASE_TYPES, c.type, x => x, x => x)}</select></label>
+        </div>
+        <label class="f"><span>죄명</span><input type="text" data-k="charge" value="${esc(c.charge)}" placeholder="사기, 절도, 명예훼손 …"></label>
+        <div class="two">
+          <label class="f"><span>담당자</span><select data-k="ownerId">${opt(db.members.filter(m => m.active), c.ownerId, m => m.id, m => `${m.rank} ${m.name} (현재 ${loadOf(m.id)}건)`)}</select></label>
+          <label class="f"><span>중요도</span><select data-k="priority">
+            <option value="normal" ${c.priority === 'normal' ? 'selected' : ''}>일반</option>
+            <option value="high"   ${c.priority === 'high' ? 'selected' : ''}>중요</option></select></label>
+        </div>
+        <div class="two">
+          <label class="f"><span>접수일</span><input type="date" data-k="receivedAt" value="${esc(c.receivedAt)}"></label>
+          <label class="f"><span>처리기한 (수사기일)</span><input type="date" data-k="dueAt" value="${esc(c.dueAt)}"></label>
+        </div>
+        <div class="two">
+          <label class="f"><span>고소인 / 진정인</span><input type="text" data-k="complainant" value="${esc(c.complainant)}" placeholder="예: 김○○"></label>
+          <label class="f"><span>피의자</span><input type="text" data-k="suspect" value="${esc(c.suspect)}" placeholder="예: 이○○"></label>
+        </div>
+        <label class="f"><span>메모</span><textarea data-k="memo">${esc(c.memo)}</textarea></label>
+        <div class="muted" style="font-size:11.5px">개인정보 보호를 위해 실명·주민번호 대신 성 + ○○ 형태로 입력하시기를 권합니다.</div>
+      </div>
+      <div class="modal-f">
+        <button class="btn ghost" data-close>취소</button>
+        <button class="btn" data-save-case="${c.id}">${isNew ? '접수 등록' : '저장'}</button>
+      </div>
+    </div></div>`;
+  $('#modal-root').dataset.newCase = isNew ? '1' : '';
+  $('#modal-root').dataset.draft = JSON.stringify(c);
+}
+
+/* ══════════ 주간 보고 ══════════ */
+function viewReport(){
+  const open = openCases();
+  const byMember = db.members.filter(m => m.active).map(m => ({
+    m, list: open.filter(c => c.ownerId === m.id)
+      .sort((a, b) => (a.dueAt || '9999') < (b.dueAt || '9999') ? -1 : 1)
+  }));
+  const closedRecent = db.cases.filter(c => isClosed(c) && (daysSince(c.stages[LAST].date) ?? 999) <= 7);
+
+  const tbl = list => list.length ? `<table>
+    <thead><tr><th style="width:110px">사건번호</th><th>죄명</th><th style="width:170px">진행 단계</th>
+      <th style="width:70px">단계경과</th><th style="width:110px">기한</th><th style="width:140px">비고</th></tr></thead>
+    <tbody>${list.map(c => {
+      const a = caseAlerts(c);
+      return `<tr data-open="${c.id}"><td>${esc(c.caseNo || '-')}</td><td>${esc(c.charge || '-')}</td>
+        <td>${c.stageIndex + 1}. ${esc(STAGES[c.stageIndex])}</td>
+        <td>${stallDays(c) ?? '-'}일</td>
+        <td>${c.dueAt ? fmt(c.dueAt) : '-'}</td>
+        <td>${a.map(x => esc(x.txt)).join(', ') || '정상'}</td></tr>`;
+    }).join('')}</tbody></table>` : '<div class="muted" style="padding:6px 0;font-size:12.5px">보유 사건 없음</div>';
+
+  return `<div class="card report">
+    <div class="card-h no-print"><h2>주간 보고 자료</h2>
+      <span class="sub">${today().replace(/-/g, '.')} 기준</span>
+      <button class="btn sm right" onclick="window.print()">인쇄 / PDF 저장</button></div>
+    <div class="card-b">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:17px;font-weight:800">부산남부경찰서 수사8팀 사건 진행 현황</div>
+        <div class="muted" style="font-size:12px">${today().replace(/-/g, '. ')} 기준 · 진행 ${open.length}건 · 최근 7일 종결 ${closedRecent.length}건</div>
+      </div>
+      <table style="margin-bottom:10px">
+        <thead><tr><th>담당</th><th style="width:70px">보유</th><th style="width:70px">정체</th><th style="width:80px">기한임박</th><th>상태</th></tr></thead>
+        <tbody>${byMember.map(({ m, list }) => {
+          const n = list.length, lv = loadLevel(n);
+          const stalled = list.filter(c => (stallDays(c) ?? 0) >= db.settings.stallDays).length;
+          const due = list.filter(c => { const d = dueDays(c); return d !== null && d <= db.settings.dueSoonDays; }).length;
+          return `<tr><td>${esc(m.rank)} ${esc(m.name)}</td><td><b>${n}</b></td><td>${stalled || '-'}</td><td>${due || '-'}</td>
+            <td><span class="pill ${lv}">${lv === 'bad' ? '목표 초과 — 배당 조정 필요' : lv === 'warn' ? '목표 근접 — 신규 배당 자제' : '여유'}</span></td></tr>`;
+        }).join('')}</tbody></table>
+      ${byMember.map(({ m, list }) => `<h3>${esc(m.rank)} ${esc(m.name)} — ${list.length}건</h3>${tbl(list)}`).join('')}
+      ${closedRecent.length ? `<h3>최근 7일 종결 (${closedRecent.length}건)</h3>
+        <table><thead><tr><th style="width:110px">사건번호</th><th>죄명</th><th style="width:120px">담당</th>
+          <th style="width:90px">접수일</th><th style="width:90px">종결일</th><th style="width:80px">처리기간</th></tr></thead>
+        <tbody>${closedRecent.map(c => `<tr data-open="${c.id}"><td>${esc(c.caseNo || '-')}</td><td>${esc(c.charge || '-')}</td>
+          <td>${esc(memberLabel(c.ownerId))}</td><td>${fmt(c.receivedAt)}</td><td>${fmt(c.stages[LAST].date)}</td>
+          <td>${daysBetween(c.receivedAt, c.stages[LAST].date) ?? '-'}일</td></tr>`).join('')}</tbody></table>` : ''}
+    </div>
+  </div>`;
+}
+
+/* ══════════ 팀원 · 설정 ══════════ */
+function viewMembers(){
+  const rows = db.members.map(m => `<tr>
+    <td><input type="text" data-m="${m.id}" data-mk="rank" value="${esc(m.rank)}" style="width:80px"></td>
+    <td><input type="text" data-m="${m.id}" data-mk="name" value="${esc(m.name)}" style="width:120px"></td>
+    <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-mk="lead" ${m.lead ? 'checked' : ''}></td>
+    <td style="text-align:center"><input type="checkbox" data-m="${m.id}" data-mk="active" ${m.active ? 'checked' : ''}></td>
+    <td><b>${loadOf(m.id)}</b>건</td>
+    <td><button class="btn ghost sm" data-m-del="${m.id}">삭제</button></td>
+  </tr>`).join('');
+
+  const s = db.settings;
+  return `<div class="grid" style="grid-template-columns:1.3fr 1fr">
+    <div class="card">
+      <div class="card-h"><h2>팀원</h2><button class="btn sm right" data-m-add>＋ 팀원 추가</button></div>
+      <table><thead><tr><th>계급</th><th>성명</th><th style="text-align:center">팀장</th>
+        <th style="text-align:center">재직</th><th>보유</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="card-b muted" style="font-size:12px;border-top:1px solid var(--line)">
+        보유 사건이 있는 팀원은 삭제되지 않습니다. 전출 시 <b>재직</b> 체크만 해제하세요.</div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-h"><h2>관리 기준</h2></div>
+        <div class="card-b">
+          <label class="f"><span>1인 목표 보유 건수 (이 수를 넘으면 빨간색)</span>
+            <input type="number" data-s="capTarget" value="${s.capTarget}" min="1"></label>
+          <label class="f"><span>주의 기준 건수 (이 수부터 노란색)</span>
+            <input type="number" data-s="capWarn" value="${s.capWarn}" min="1"></label>
+          <label class="f"><span>단계 정체 경보 기준 (일)</span>
+            <input type="number" data-s="stallDays" value="${s.stallDays}" min="1"></label>
+          <label class="f"><span>기한 임박 경보 기준 (일)</span>
+            <input type="number" data-s="dueSoonDays" value="${s.dueSoonDays}" min="1"></label>
+          <button class="btn" data-s-save>기준 저장</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-h"><h2>데이터 백업 · 복원</h2></div>
+        <div class="card-b">
+          <div class="muted" style="font-size:12.5px;margin-bottom:11px">
+            모든 데이터는 이 PC의 브라우저에만 저장되며 외부로 전송되지 않습니다.
+            브라우저 방문기록을 삭제하면 데이터도 지워지므로 <b>주 1회 백업</b>을 권합니다.<br>
+            마지막 백업: <b>${db.lastBackupAt ? fmt(db.lastBackupAt) : '없음'}</b>
+          </div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            <button class="btn" data-act="backup">백업 파일 내려받기</button>
+            <button class="btn ghost" data-act="restore">백업 파일 복원</button>
+            <button class="btn ghost" data-act="csv">엑셀(CSV) 내보내기</button>
+          </div>
+          <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+            <button class="btn danger sm" data-act="reset">전체 데이터 초기화</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ══════════ 백업 / 복원 / 내보내기 ══════════ */
+function download(name, text, mime){
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function doBackup(){
+  db.lastBackupAt = today(); save();
+  download(`team8-backup-${today()}.json`, JSON.stringify(db, null, 2), 'application/json');
+  render();
+}
+function doCsv(){
+  const head = ['사건번호','구분','죄명','담당','접수일','처리기한','현재단계','단계경과(일)','상태','고소인','피의자','메모'];
+  const lines = [head.join(',')];
+  db.cases.forEach(c => {
+    lines.push([
+      c.caseNo, c.type, c.charge, memberLabel(c.ownerId), c.receivedAt, c.dueAt,
+      `${c.stageIndex + 1}. ${STAGES[c.stageIndex]}`, stallDays(c) ?? '',
+      isClosed(c) ? '종결' : '진행', c.complainant, c.suspect, (c.memo || '').replace(/\n/g, ' ')
+    ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+  });
+  download(`team8-cases-${today()}.csv`, '﻿' + lines.join('\r\n'), 'text/csv;charset=utf-8');
+}
+function doRestore(file){
+  const rd = new FileReader();
+  rd.onload = () => {
+    try{
+      const next = JSON.parse(rd.result);
+      if(!next.members || !next.cases) throw new Error('형식이 올바르지 않습니다.');
+      if(!confirm(`복원하면 현재 데이터(사건 ${db.cases.length}건)가 백업 파일의 내용(사건 ${next.cases.length}건)으로 완전히 대체됩니다.\n계속할까요?`)) return;
+      db = next; db.settings = Object.assign(defaultDb().settings, db.settings || {});
+      save(); openCaseId = null; $('#modal-root').innerHTML = ''; render();
+      alert('복원했습니다.');
+    }catch(e){ alert('복원 실패: ' + e.message); }
+  };
+  rd.readAsText(file);
+}
+
+/* ══════════ 이벤트 ══════════ */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-tab],[data-open],[data-owner],[data-stage],[data-act],[data-close],[data-close-mask],[data-edit],[data-del],[data-stage-set],[data-stage-undo],[data-note-add],[data-note-del],[data-ack],[data-memo-save],[data-save-case],[data-m-add],[data-m-del],[data-s-save]');
+  if(!t) return;
+  const d = t.dataset;
+  const c = openCaseId ? caseById(openCaseId) : null;
+
+  if(d.tab){ view = d.tab; render(); return; }
+
+  if(d.closeMask !== undefined && t === e.target){ openCaseId = null; $('#modal-root').innerHTML = ''; return; }
+  if(d.close !== undefined){ openCaseId = null; $('#modal-root').innerHTML = ''; return; }
+
+  if(d.open){ openCaseId = d.open; renderDetail(); return; }
+  if(d.owner){ view = 'list'; filters.owner = d.owner; filters.status = 'open'; render(); return; }
+  if(d.stage !== undefined && !d.stageSet && !d.stageUndo){ view = 'list'; filters.stage = d.stage; filters.status = 'open'; render(); return; }
+
+  if(d.act === 'backup'){ doBackup(); return; }
+  if(d.act === 'csv'){ doCsv(); return; }
+  if(d.act === 'restore'){ $('#file-import').click(); return; }
+  if(d.act === 'reset'){
+    if(confirm('모든 사건과 팀원 정보가 삭제됩니다. 되돌릴 수 없습니다.\n먼저 백업하셨습니까?')
+    && confirm('정말 초기화할까요?')){ db = defaultDb(); save(); openCaseId = null; $('#modal-root').innerHTML = ''; render(); }
+    return;
+  }
+
+  /* 사건 등록 / 수정 */
+  if(d.edit){ renderForm(caseById(d.edit), false); return; }
+  if(d.saveCase){
+    const isNew = $('#modal-root').dataset.newCase === '1';
+    const draft = JSON.parse($('#modal-root').dataset.draft);
+    $('#modal-root').querySelectorAll('[data-k]').forEach(el => { draft[el.dataset.k] = el.value; });
+    if(!draft.caseNo.trim() && !draft.charge.trim()){ alert('사건번호 또는 죄명 중 하나는 입력해 주세요.'); return; }
+    draft.updatedAt = today();
+    if(isNew){
+      draft.stages[0].done = true; draft.stages[0].date = draft.receivedAt || today();
+      draft.stageEnteredAt = draft.receivedAt || today();
+      db.cases.push(draft);
+      const n = loadOf(draft.ownerId);
+      save();
+      $('#modal-root').innerHTML = '';
+      if(n > db.settings.capTarget) alert(`${memberLabel(draft.ownerId)} 보유 사건이 ${n}건으로 목표(${db.settings.capTarget}건)를 초과했습니다.\n배당 조정 또는 조기 종결 검토가 필요합니다.`);
+      openCaseId = draft.id; render(); renderDetail();
+    }else{
+      const idx = db.cases.findIndex(x => x.id === draft.id);
+      db.cases[idx] = Object.assign(db.cases[idx], draft);
+      save(); $('#modal-root').innerHTML = ''; render();
+      if(openCaseId) renderDetail();
+    }
+    return;
+  }
+  if(d.del){
+    const x = caseById(d.del);
+    if(confirm(`[${x.caseNo || x.charge}] 사건을 삭제할까요? 되돌릴 수 없습니다.`)){
+      db.cases = db.cases.filter(y => y.id !== d.del);
+      save(); openCaseId = null; $('#modal-root').innerHTML = ''; render();
+    }
+    return;
+  }
+
+  /* 단계 */
+  if(d.stageSet !== undefined && c){
+    const i = +d.stageSet;
+    if(i === LAST && !confirm('이 사건을 종결 처리할까요?')) return;
+    setStage(c, i); render(); renderDetail(); return;
+  }
+  if(d.stageUndo !== undefined && c){ undoStage(c, +d.stageUndo); render(); renderDetail(); return; }
+
+  /* 팀장 의견 */
+  if(d.noteAdd !== undefined && c){
+    const txt = prompt(`[${STAGES[+d.noteAdd]}] 단계 팀장 의견을 입력하세요.\n(수사 방향, 보완 지시, 검토 사항 등)`);
+    if(txt && txt.trim()){
+      c.notes.push({ id:uid(), stage:+d.noteAdd, text:txt.trim(), at:today(), ack:false, ackAt:'' });
+      c.updatedAt = today(); save(); render(); renderDetail();
+    }
+    return;
+  }
+  if(d.noteDel && c){
+    if(confirm('이 의견을 삭제할까요?')){ c.notes = c.notes.filter(n => n.id !== d.noteDel); save(); render(); renderDetail(); }
+    return;
+  }
+  if(d.ack && c){
+    const n = c.notes.find(x => x.id === d.ack);
+    n.ack = true; n.ackAt = today(); save(); render(); renderDetail(); return;
+  }
+  if(d.memoSave !== undefined && c){
+    c.memo = $('[data-memo]').value; c.updatedAt = today(); save();
+    t.textContent = '저장됨 ✓'; setTimeout(() => { t.textContent = '메모 저장'; }, 1400);
+    return;
+  }
+
+  /* 팀원 · 설정 */
+  if(d.mAdd !== undefined){ db.members.push({ id:uid(), rank:'순경', name:'새 팀원', lead:false, active:true }); save(); render(); return; }
+  if(d.mDel){
+    if(loadOf(d.mDel) > 0){ alert('보유 사건이 있는 팀원은 삭제할 수 없습니다. 사건을 재배당한 뒤 삭제하거나, 재직 체크만 해제하세요.'); return; }
+    if(confirm('이 팀원을 삭제할까요?')){ db.members = db.members.filter(m => m.id !== d.mDel); save(); render(); }
+    return;
+  }
+  if(d.sSave !== undefined){
+    document.querySelectorAll('[data-s]').forEach(el => { db.settings[el.dataset.s] = Math.max(1, +el.value || 1); });
+    save(); render(); return;
+  }
+});
+
+/* 신규 접수 / 백업 버튼 */
+$('#btn-new').onclick = () => renderForm(newCase(), true);
+$('#btn-backup').onclick = doBackup;
+$('#file-import').onchange = e => { if(e.target.files[0]) doRestore(e.target.files[0]); e.target.value = ''; };
+
+/* 필터 · 팀원 인라인 편집 */
+document.addEventListener('input', e => {
+  const el = e.target;
+  if(el.dataset.f !== undefined){ filters[el.dataset.f] = el.value; render(); const n = $(`[data-f="${el.dataset.f}"]`); if(n && el.type === 'text'){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }
+});
+document.addEventListener('change', e => {
+  const el = e.target;
+  if(el.dataset.m){
+    const m = db.members.find(x => x.id === el.dataset.m);
+    m[el.dataset.mk] = el.type === 'checkbox' ? el.checked : el.value;
+    if(el.dataset.mk === 'lead' && el.checked) db.members.forEach(x => { if(x.id !== m.id) x.lead = false; });
+    save();
+    if(el.type === 'checkbox') render();
+  }
+});
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape'){ openCaseId = null; $('#modal-root').innerHTML = ''; }
+});
+
+/* 시작 */
+load();
+render();
+</script>
+</body>
+</html>
