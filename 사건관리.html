@@ -792,7 +792,7 @@ function viewReport(){
           const stalled = list.filter(c => (stallDays(c) ?? 0) >= db.settings.stallDays).length;
           const due = list.filter(c => { const d = dueDays(c); return d !== null && d <= db.settings.dueSoonDays; }).length;
           return `<tr><td>${esc(m.rank)} ${esc(m.name)}</td><td><b>${n}</b></td><td>${stalled || '-'}</td><td>${due || '-'}</td>
-            <td><span class="pill ${lv}">${lv === 'bad' ? '목표 초과 — 배당 조정 필요' : lv === 'warn' ? '목표 근접 — 신규 배당 자제' : '여유'}</span></td></tr>`;
+            <td><span class="pill ${lv}">${lv === 'bad' ? '목표 초과 — 배당 조정 필요' : lv === 'warn' ? '사건처리 필요' : '여유'}</span></td></tr>`;
         }).join('')}</tbody></table>
       ${byMember.map(({ m, list }) => `<h3>${esc(m.rank)} ${esc(m.name)} — ${list.length}건</h3>${tbl(list)}`).join('')}
       ${closedRecent.length ? `<h3>최근 7일 종결 (${closedRecent.length}건)</h3>
@@ -925,17 +925,48 @@ const FIELDS = [
   { k:'intakeNo',    label:'접수번호',        alias:['접수번호','사건번호','접수no','접수 번호','번호','사건접수번호'] },
   { k:'charge',      label:'죄명',            alias:['죄명','죄종','사건명','혐의','범죄명'] },
   { k:'ownerName',   label:'담당자',          alias:['담당','담당자','수사관','담당수사관','주무관','처리자'] },
-  { k:'type',        label:'사건 구분',       alias:['구분','사건구분','접수구분','유형','종류'] },
+  { k:'type',        label:'사건 구분',       alias:['구분','사건구분','접수구분','유형','종류','접수단서','단서'] },
   { k:'receivedAt',  label:'접수일',          alias:['접수일','접수일자','접수년월일','접수날짜','접수일시'] },
   { k:'dueAt',       label:'처리기한',        alias:['기한','처리기한','수사기일','만료일','처리기일','완료기한'] },
   { k:'complainant', label:'고소인/진정인',   alias:['고소인','진정인','피해자','고소인(진정인)','신고인'] },
-  { k:'suspect',     label:'피의자',          alias:['피의자','피혐의자','상대방','피고소인'] },
-  { k:'stageName',   label:'진행 단계',       alias:['단계','진행단계','진행상황','수사단계','진행'] },
-  { k:'priority',    label:'중요도',          alias:['중요도','우선순위','등급'] },
+  { k:'suspect',     label:'피의자',          alias:['피의자','피혐의자','피(혐)의자','상대방','피고소인'] },
+  { k:'stageName',   label:'진행 단계',       alias:['단계','진행단계','진행상황','진행상태','수사단계','진행'] },
+  { k:'priority',    label:'중요도',          alias:['중요도','우선순위','등급','지연'] },
   { k:'memo',        label:'메모',            alias:['메모','비고','특이사항','내용','요지'] }
 ];
 const norm = s => String(s ?? '').replace(/[\s()\[\]·.\-_/]/g, '').toLowerCase();
 
+/* 머리글 후보 점수 — 별칭과 '정확히' 일치하는 칸 수.
+   KICS 조회 결과처럼 위쪽에 조회조건이 여러 줄 붙어 있어도 진짜 머리글 줄을 찾아낸다.
+   ('접수번호   : ~' 같은 조건 줄은 정확히 일치하지 않으므로 0점이 된다) */
+function headerScore(row){
+  return FIELDS.filter(f => row.some(h => f.alias.some(a => norm(h) === norm(a)))).length;
+}
+function findHeaderRow(rows){
+  let best = 0, bestScore = 0;
+  for(let i = 0; i < Math.min(rows.length - 1, 40); i++){
+    const sc = headerScore(rows[i]);
+    if(sc > bestScore){ bestScore = sc; best = i; }
+  }
+  return bestScore >= 2 ? best : 0;
+}
+/* '2026-009126(08-28)' → 접수번호 2026-009126 + 접수일 2026-08-28
+   KICS 조회 결과는 접수일 열이 따로 없고 접수번호 괄호 안에 월-일이 들어 있다. */
+function splitIntakeNo(v){
+  const t = String(v ?? '').trim();
+  const m = t.match(/^(.*?)\s*\((\d{1,2})\s*[-.\/]\s*(\d{1,2})\)$/);
+  if(!m) return { no:t, date:'' };
+  const no = m[1].trim();
+  const y = (no.match(/(\d{4})/) || [])[1];
+  return { no, date: y ? `${y}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '' };
+}
+/* KICS 진행상태 → 이 앱의 단계. 대략의 출발점이며 등록 후 사건별로 조정하면 된다. */
+const STAGE_ALIAS = {
+  '접수':0, '배당':0, '미배당':0, '미착수':0, '수리':0,
+  '입건':1, '수사중':1, '조사중':1, '수사진행':1,
+  '결정중':16, '결정':16, '송치결정':16, '검토중':16,
+  '송치':20, '불송치':20, '수사중지':20, '종결':20, '완료':20, '이송':20
+};
 function autoMap(headers){
   const m = {};
   FIELDS.forEach(f => {
@@ -968,8 +999,13 @@ function matchStage(v){
   const n = norm(v);
   if(!n) return 0;
   if(/^\d+$/.test(n)){ const i = +n - 1; return (i >= 0 && i <= LAST) ? i : 0; }
+  if(STAGE_ALIAS[n] !== undefined) return STAGE_ALIAS[n];
   let i = STAGES.findIndex(s => norm(s.n) === n);
   if(i < 0) i = STAGES.findIndex(s => norm(s.n).includes(n) || n.includes(norm(s.n)));
+  if(i < 0){
+    const key = Object.keys(STAGE_ALIAS).find(k => n.includes(k));
+    if(key) return STAGE_ALIAS[key];
+  }
   return i < 0 ? 0 : i;
 }
 
@@ -978,9 +1014,12 @@ let imp = null;   // { rows, headers, map, defaultOwner, skipDup }
 
 function startImport(rows, fileName){
   if(rows.length < 2) throw new Error('머리글 1줄과 자료 1줄 이상이 필요합니다.');
+  const h = findHeaderRow(rows);
+  const body = rows.slice(h + 1);
+  if(!body.length) throw new Error('머리글 아래에 자료가 없습니다.');
   imp = {
-    fileName, headers: rows[0], body: rows.slice(1),
-    map: autoMap(rows[0]),
+    fileName, skippedRows: h, headers: rows[h], body,
+    map: autoMap(rows[h]),
     defaultOwner: db.members[0].id,
     skipDup: true
   };
@@ -989,8 +1028,11 @@ function startImport(rows, fileName){
 function buildRows(){
   const g = (r, k) => { const i = imp.map[k]; return i >= 0 ? (r[i] ?? '') : ''; };
   const seen = new Set();
-  return imp.body.map(r => {
-    const intakeNo = String(g(r, 'intakeNo')).trim();
+  /* 연결된 항목이 하나도 없는 줄은 자료가 아니라 구분선·쪽번호·발행일 같은 장식이므로 조용히 버린다 */
+  const body = imp.body.filter(r => FIELDS.some(f => String(g(r, f.k) ?? '').trim() !== ''));
+  return body.map(r => {
+    const sp = splitIntakeNo(g(r, 'intakeNo'));
+    const intakeNo = sp.no;
     const charge = String(g(r, 'charge')).trim();
     const ownerRaw = String(g(r, 'ownerName')).trim();
     const m = matchMember(ownerRaw);
@@ -999,7 +1041,8 @@ function buildRows(){
     if(intakeNo) seen.add(intakeNo);
     const dupInDb = intakeNo && db.cases.some(c => c.intakeNo === intakeNo);
     const err = (!intakeNo && !charge) ? '접수번호·죄명이 모두 비어 있음' : '';
-    const rec = toDate(g(r, 'receivedAt')) || today();
+    /* 접수일 열이 없으면 접수번호 괄호 안의 월-일을 쓴다 */
+    const rec = toDate(g(r, 'receivedAt')) || sp.date || today();
     return {
       intakeNo, charge,
       type: CASE_TYPES.includes(typeRaw) ? typeRaw : '고소',
@@ -1010,7 +1053,7 @@ function buildRows(){
       complainant: String(g(r, 'complainant')).trim(),
       suspect: String(g(r, 'suspect')).trim(),
       stageIndex: matchStage(g(r, 'stageName')),
-      priority: /중요|긴급|높|high/i.test(String(g(r, 'priority'))) ? 'high' : 'normal',
+      priority: /중요|긴급|높|high|[●◎○]/i.test(String(g(r, 'priority'))) ? 'high' : 'normal',
       memo: String(g(r, 'memo')).trim(),
       err, dup: dupInDb || dupInFile
     };
@@ -1028,7 +1071,8 @@ function renderImport(){
   $('#modal-root').innerHTML = `<div class="mask">
     <div class="modal xl">
       <div class="modal-h"><h3>엑셀 불러오기</h3>
-        <span class="sub muted">${esc(imp.fileName)} · ${imp.body.length}행</span>
+        <span class="sub muted">${esc(imp.fileName)} · 자료 ${rows.length}행${
+          imp.skippedRows ? ` · 위 ${imp.skippedRows}줄(조회조건 등)은 건너뛰고 ${imp.skippedRows + 1}번째 줄을 머리글로 인식` : ''}</span>
         <button class="btn ghost sm right" data-imp-cancel>닫기</button></div>
       <div class="modal-b">
         <div class="muted" style="font-size:12.5px;font-weight:700;margin-bottom:8px">1. 열 연결 <span style="font-weight:400">— 머리글 이름으로 자동 인식했습니다. 틀린 곳만 바꾸세요.</span></div>
