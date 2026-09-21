@@ -862,13 +862,15 @@ function countBy(list, fn, top){
 /* ── SVG 조각 ── */
 const tip = (label, lines) =>
   `data-tip="${esc(label)}" data-tipbody="${esc(lines.join(' · '))}"`;
-/* 눈금은 보기 좋은 수(1·2·5의 배수)로 끊는다 */
+/* 눈금은 보기 좋은 수(1·2·5의 배수)로 끊되, 맨 위 눈금은 반드시 최대값 이상이어야 한다.
+   (눈금을 최대값 이하에서 끊으면 막대·선이 그림 영역 밖으로 솟는다) */
 function niceTicks(max, want = 4){
-  if(max <= 0) return [0, 1];
+  if(!(max > 0)) return [0, 1];
   const raw = max / want, p = Math.pow(10, Math.floor(Math.log10(raw)));
   const step = [1, 2, 2.5, 5, 10].map(x => x * p).find(x => x >= raw) || p * 10;
+  const top = Math.ceil(max / step - 1e-9) * step;
   const out = [];
-  for(let v = 0; v <= max + step * 0.001; v += step) out.push(Math.round(v * 100) / 100);
+  for(let v = 0; v <= top + step * 1e-6; v += step) out.push(Math.round(v * 1000) / 1000);
   return out;
 }
 
