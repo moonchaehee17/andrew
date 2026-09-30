@@ -72,6 +72,8 @@ tbody tr.row:hover{background:var(--accent-soft)}
 .pill.bad{background:var(--bad-soft); color:var(--bad)}
 .pill.neutral{background:var(--panel2); color:var(--muted); border:1px solid var(--line)}
 .pill.accent{background:var(--accent-soft); color:var(--accent)}
+.pill.kind-b{background:#efe7fa; color:#5b3aa7}     /* 보완수사요구 */
+.pill.kind-j{background:#fdeee6; color:#a8471b}     /* 재수사요청 */
 .empty{padding:34px; text-align:center; color:var(--muted); font-size:13px}
 
 .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:14px}
@@ -229,6 +231,7 @@ tr.dup-row td{background:var(--warn-soft)}
   <nav class="tabs" id="tabs"></nav>
   <div class="util">
     <button id="btn-new">+ 사건 접수</button>
+    <button id="btn-new-sub">+ 보완 · 재수사</button>
     <button id="btn-xls">엑셀 불러오기</button>
     <button id="btn-backup">백업</button>
   </div>
@@ -246,13 +249,13 @@ tr.dup-row td{background:var(--warn-soft)}
    ══════════════════════════════════════════════════════════════ */
 
 const KEY = 'nambu-team8-case-mgmt-v1';   // 저장 키는 유지(기존 데이터 자동 이관)
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 /* ── 수사 진행 단계 ──
    opt:true  = 사건에 따라 거치지 않을 수 있는 선택 단계 (해당없음 처리 가능)
    review    = 팀장 검토 지정 단계
    branch    = 이 단계에서 조기 이탈(이송)이 발생할 수 있음                    */
-const STAGES = [
+const TRACK_GENERAL = [
   { n:'접수',                              p:'접수 · 분석' },
   { n:'사건분석 (범죄사실·구성요건 정리)',   p:'접수 · 분석', review:true },
   { n:'관할 검토',                          p:'접수 · 분석', branch:'타 관서 관할이면 이송으로 종결' },
@@ -275,15 +278,73 @@ const STAGES = [
   { n:'사건당사자 통지',                     p:'종결 절차' },
   { n:'종결',                                p:'종결 절차' }
 ];
-const LAST = STAGES.length - 1;
-const PHASES = [...new Set(STAGES.map(s => s.p))];
-const CASE_TYPES = ['고소', '고발', '진정', '인지', '송치전이송', '기타'];
-const DISPOSITIONS = [
-  { v:'송치',        d:'혐의가 인정되어 검찰 송치' },
-  { v:'불송치',      d:'혐의 없음·죄가 안 됨 등 불송치 결정' },
-  { v:'수사중지',    d:'피의자 소재불명 등 중지사유 발생' },
-  { v:'타관서 이송', d:'관할이 다른 관서에 있어 이송' }
+/* ── 보완수사요구 사건 (형사소송법 제197조의2) ── */
+const TRACK_BOWAN = [
+  { n:'보완수사요구 접수',            p:'접수 · 분석' },
+  { n:'요구사항 분석 (범위·쟁점 정리)', p:'접수 · 분석', review:true },
+  { n:'보완수사 실시',                p:'보완수사' },
+  { n:'추가 조사',                    p:'보완수사', opt:true },
+  { n:'이행 결과 검토',               p:'종결 절차', review:true },
+  { n:'보완수사 결과 통보서 작성',    p:'종결 절차' },
+  { n:'결과 통보 · 관계서류 송부',    p:'종결 절차' },
+  { n:'종결',                         p:'종결 절차' }
 ];
+/* ── 재수사요청 사건 (형사소송법 제245조의8) ── */
+const TRACK_JAESUSA = [
+  { n:'재수사요청 접수',              p:'접수 · 분석' },
+  { n:'요청사항 분석 (불송치 사유 재검토)', p:'접수 · 분석', review:true },
+  { n:'재수사 실시',                  p:'재수사' },
+  { n:'추가 조사',                    p:'재수사', opt:true },
+  { n:'재수사 결과 검토',             p:'종결 절차', review:true },
+  { n:'재수사 결과서 작성',           p:'종결 절차' },
+  { n:'결과 통보 · 관계서류 송부',    p:'종결 절차' },
+  { n:'종결',                         p:'종결 절차' }
+];
+const TRACKS = { '일반':TRACK_GENERAL, '보완':TRACK_BOWAN, '재수사':TRACK_JAESUSA };
+
+/* 사건 종류 — 일반사건 / 보완 등 사건(보완수사요구 · 재수사요청) */
+const KINDS = [
+  { k:'일반',   label:'일반사건',       group:'일반',    basis:'접수일',
+    setting:'dueDefaultDays', note:'' },
+  { k:'보완',   label:'보완수사요구',   group:'보완 등', basis:'요구받은 날',
+    setting:'dueBowanDays',   note:'형사소송법 제197조의2' },
+  { k:'재수사', label:'재수사요청',     group:'보완 등', basis:'요청받은 날',
+    setting:'dueJaesusaDays', note:'형사소송법 제245조의8' }
+];
+const kindOf   = c => TRACKS[c && c.kind] ? c.kind : '일반';
+const stagesOf = c => TRACKS[kindOf(c)];
+const lastOf   = c => stagesOf(c).length - 1;
+const kindInfo = k => KINDS.find(x => x.k === k) || KINDS[0];
+const phasesOf = k => [...new Set(TRACKS[k].map(s => s.p))];
+const dueDaysOf = k => db.settings[kindInfo(k).setting] ?? db.settings.dueDefaultDays;
+const isSub    = c => kindOf(c) !== '일반';          // 보완 등 사건인지
+
+/* 일반 트랙 기준 상수 — 트랙과 무관한 자리에서만 쓴다 */
+const STAGES = TRACK_GENERAL;
+const LAST = TRACK_GENERAL.length - 1;
+const PHASES = phasesOf('일반');
+
+const CASE_TYPES = ['고소', '고발', '진정', '인지', '송치전이송', '기타'];
+/* 종결 구분 — 사건 종류별로 다르다 */
+const DISPO_BY_KIND = {
+  '일반': [
+    { v:'송치',        d:'혐의가 인정되어 공소청 송치' },
+    { v:'불송치',      d:'혐의 없음·죄가 안 됨 등 불송치 결정' },
+    { v:'수사중지',    d:'피의자 소재불명 등 중지사유 발생' },
+    { v:'타관서 이송', d:'관할이 다른 관서에 있어 이송' }
+  ],
+  '보완': [
+    { v:'보완 이행·송치', d:'요구받은 보완수사를 이행하고 결과를 통보' },
+    { v:'불송치 전환',    d:'보완수사 결과 혐의가 인정되지 않아 불송치로 변경' },
+    { v:'수사중지',       d:'소재불명 등으로 보완수사를 계속할 수 없음' }
+  ],
+  '재수사': [
+    { v:'재수사 후 송치', d:'재수사 결과 혐의가 인정되어 송치' },
+    { v:'불송치 유지',    d:'재수사했으나 기존 불송치 결정을 유지' },
+    { v:'수사중지',       d:'소재불명 등으로 재수사를 계속할 수 없음' }
+  ]
+};
+const dispoOf = c => DISPO_BY_KIND[kindOf(c)] || DISPO_BY_KIND['일반'];
 
 /* 구 11단계 → 신 21단계 이관표 */
 const V1_MAP = [0, 1, 3, 4, 6, 15, 16, 17, 18, 19, 20];
@@ -292,7 +353,7 @@ const V1_MAP = [0, 1, 3, 4, 6, 15, 16, 17, 18, 19, 20];
 let db = null;
 let view = 'dash';
 let openCaseId = null;
-let filters = { owner:'', stage:'', status:'open', q:'' };
+let filters = { owner:'', stage:'', status:'open', q:'', kind:'' };
 let sort = { key:'', dir:1 };          // key 가 비면 기본 정렬(긴급 우선 → 기한 순)
 
 /* ── 유틸 ── */
@@ -324,15 +385,20 @@ function defaultDb(){
       mk('경사', '이종윤'), mk('경장', '이민화'), mk('순경', '김태안')
     ],
     cases: [],
-    settings: { capTarget:10, capWarn:9, stallDays:14, dueSoonDays:7, dueDefaultDays:60 },
+    settings: { capTarget:10, capWarn:9, stallDays:14, dueSoonDays:7,
+      dueDefaultDays:60, dueBowanDays:30, dueJaesusaDays:90 },
     lastBackupAt: null
   };
 }
 /* 구버전 데이터를 신 단계 체계로 이관한다. */
 function migrate(d){
   if(!d || (d.version || 1) >= DB_VERSION) return d;
+  const fromV1 = (d.version || 1) < 2;
   (d.cases || []).forEach(c => {
+    if(c.kind === undefined) c.kind = '일반';        // 기존 사건은 모두 일반사건
+    if(c.origNo === undefined) c.origNo = '';
     if(c.intakeNo === undefined){ c.intakeNo = c.caseNo || ''; delete c.caseNo; }
+    if(!fromV1) return;                              // v2 → v3 은 종류 부여만 하면 된다
     const old = c.stages || [];
     const next = STAGES.map(() => ({ done:false, date:'', skip:false }));
     old.forEach((s, i) => {
@@ -349,9 +415,20 @@ function migrate(d){
     c.stageIndex = V1_MAP[Math.min(c.stageIndex ?? 0, V1_MAP.length - 1)];
     (c.notes || []).forEach(n => { n.stage = V1_MAP[n.stage] ?? n.stage; });
     if(c.disposition === undefined) c.disposition = next[LAST].done ? '송치' : '';
+    c.kind = '일반'; c.origNo = '';
   });
   d.version = DB_VERSION;
   return d;
+}
+/* 단계 배열 길이가 트랙과 다르면 맞춘다 — 종류 변경 이력이나 손상된 백업을 방어한다 */
+function normalizeCases(d){
+  (d.cases || []).forEach(c => {
+    const T = TRACKS[kindOf(c)];
+    if(!Array.isArray(c.stages)) c.stages = [];
+    if(c.stages.length !== T.length)
+      c.stages = T.map((_, i) => c.stages[i] || { done:false, date:'', skip:false });
+    c.stageIndex = Math.min(Math.max(0, c.stageIndex | 0), T.length - 1);
+  });
 }
 function load(){
   let migrated = false;
@@ -365,6 +442,7 @@ function load(){
   }catch(e){ console.warn('저장소 읽기 실패', e); }
   if(!db || !db.members) db = defaultDb();
   db.settings = Object.assign(defaultDb().settings, db.settings || {});
+  normalizeCases(db);
   if(migrated) save();          // 이관 결과를 즉시 저장한다
   return db;
 }
@@ -374,24 +452,38 @@ function save(){
 }
 
 /* ── 도메인 ── */
-function newCase(){
+function newCase(kind = '일반'){
   return {
-    id: uid(), intakeNo: '', charge: '', type: '고소', receivedAt: today(),
+    id: uid(), kind, origNo: '', intakeNo: '', charge: '', type: '고소', receivedAt: today(),
     ownerId: db.members[0].id, complainant: '', suspect: '',
-    dueAt: addDays(today(), db.settings.dueDefaultDays),
+    dueAt: addDays(today(), dueDaysOf(kind)),
     priority: 'normal', stageIndex: 0, stageEnteredAt: today(),
-    stages: STAGES.map(() => ({ done:false, date:'', skip:false })),
+    stages: TRACKS[kind].map(() => ({ done:false, date:'', skip:false })),
     disposition: '', notes: [], memo: '',
     createdAt: today(), updatedAt: today()
   };
 }
-const isClosed  = c => c.stageIndex >= LAST && c.stages[LAST].done;
+/* 사건 종류가 바뀌면 단계 트랙 전체가 달라지므로 진행 상태를 새로 잡는다.
+   c.kind 는 이미 새 값으로 설정돼 있어도 된다 */
+function resetTrack(c){
+  c.stages = TRACKS[kindOf(c)].map(() => ({ done:false, date:'', skip:false }));
+  c.stages[0].done = true; c.stages[0].date = c.receivedAt || today();
+  c.stageIndex = 0; c.stageEnteredAt = c.receivedAt || today();
+  c.disposition = '';
+  c.notes = [];                                    // 단계 번호가 달라져 의견을 붙여둘 곳이 없다
+}
+const isClosed  = c => { const L = lastOf(c); return c.stageIndex >= L && !!(c.stages[L] || {}).done; };
+const closedDate = c => isClosed(c) ? (c.stages[lastOf(c)].date || '') : '';
 const openCases = () => db.cases.filter(c => !isClosed(c));
 const member    = id => db.members.find(m => m.id === id) || { rank:'', name:'(미지정)' };
 const memberLabel = id => { const m = member(id); return (m.rank ? m.rank + ' ' : '') + m.name; };
 const caseById  = id => db.cases.find(c => c.id === id);
 const loadOf    = id => openCases().filter(c => c.ownerId === id).length;
 
+const stageOf = c => stagesOf(c)[c.stageIndex] || stagesOf(c)[0];
+const kindBadge = c => isSub(c)
+  ? `<span class="pill kind-${kindOf(c) === '보완' ? 'b' : 'j'}">${esc(kindInfo(kindOf(c)).label)}</span>`
+  : '<span class="pill neutral">일반</span>';
 function progressPct(c){
   const active = c.stages.filter(s => !s.skip).length || 1;
   return Math.round(c.stages.filter(s => s.done && !s.skip).length / active * 100);
@@ -412,7 +504,7 @@ function caseAlerts(c){
   if(dd !== null && dd < 0)                   out.push({ lv:'bad',  txt:`기한 ${-dd}일 경과` });
   else if(dd !== null && dd <= s.dueSoonDays)  out.push({ lv:'warn', txt:`기한 D-${dd}` });
   const st = stallDays(c);
-  if(st !== null && st >= s.stallDays)         out.push({ lv:'bad',  txt:`${STAGES[c.stageIndex].n} 단계 ${st}일 정체` });
+  if(st !== null && st >= s.stallDays)         out.push({ lv:'bad',  txt:`${stageOf(c).n} 단계 ${st}일 정체` });
   const unack = c.notes.filter(n => !n.ack).length;
   if(unack)                                    out.push({ lv:'warn', txt:`팀장 의견 미확인 ${unack}건` });
   return out;
@@ -425,15 +517,15 @@ function allAlerts(){
 }
 
 /* 선택 단계 i가 속한 연속 선택구간 [시작, 끝] */
-function optRun(i){
+function optRun(T, i){
   let a = i, b = i;
-  while(a - 1 >= 0 && STAGES[a - 1].opt) a--;
-  while(b + 1 < STAGES.length && STAGES[b + 1].opt) b++;
+  while(a - 1 >= 0 && T[a - 1].opt) a--;
+  while(b + 1 < T.length && T[b + 1].opt) b++;
   return [a, b];
 }
 /* 그 선택구간을 이 사건에서 실제로 밟았는가 (하나라도 완료했으면 밟은 것) */
 function optRunTouched(c, i){
-  const [a, b] = optRun(i);
+  const [a, b] = optRun(stagesOf(c), i);
   for(let k = a; k <= b; k++) if(c.stages[k].done) return true;
   return false;
 }
@@ -443,35 +535,36 @@ function optRunTouched(c, i){
    해당없음으로 자동 처리한다. 이미 영장을 신청한 사건의 집행·분석 단계를 임의로 지우지 않기 위함이며,
    정리되지 않은 단계는 '미처리'로 표시해 사용자가 완료/해당없음을 직접 고르게 한다. */
 function setStage(c, idx){
+  const T = stagesOf(c), L = T.length - 1;
   for(let i = 0; i < idx; i++){
     const st = c.stages[i];
     if(st.done) continue;
-    if(STAGES[i].opt){ if(!st.skip && optRun(i)[1] < idx && !optRunTouched(c, i)) st.skip = true; }
+    if(T[i].opt){ if(!st.skip && optRun(T, i)[1] < idx && !optRunTouched(c, i)) st.skip = true; }
     else { st.done = true; st.date = today(); st.skip = false; }
   }
-  for(let i = idx; i < STAGES.length; i++){
-    const done = (i === idx && idx === LAST);
+  for(let i = idx; i < T.length; i++){
+    const done = (i === idx && idx === L);
     c.stages[i].done = done;
     c.stages[i].date = done ? today() : '';
     c.stages[i].skip = false;
   }
   if(c.stageIndex !== idx) c.stageEnteredAt = today();
   c.stageIndex = idx;
-  if(idx !== LAST) c.disposition = '';
+  if(idx !== L) c.disposition = '';
   c.updatedAt = today();
   save();
 }
 function markDone(c, i){
   const st = c.stages[i];
   st.done = true; st.skip = false; st.date = st.date || today();
-  if(c.stageIndex === i) setStage(c, Math.min(i + 1, LAST));
+  if(c.stageIndex === i) setStage(c, Math.min(i + 1, lastOf(c)));
   c.updatedAt = today();
   save();
 }
 function toggleSkip(c, i){
   const st = c.stages[i];
   st.skip = !st.skip;
-  if(st.skip){ st.done = false; st.date = ''; if(c.stageIndex === i) setStage(c, Math.min(i + 1, LAST)); }
+  if(st.skip){ st.done = false; st.date = ''; if(c.stageIndex === i) setStage(c, Math.min(i + 1, lastOf(c))); }
   c.updatedAt = today();
   save();
 }
@@ -510,12 +603,14 @@ function backupBanner(){
 /* ══════════ 대시보드 ══════════ */
 function viewDash(){
   const open = openCases();
-  const closedThisMonth = db.cases.filter(c => isClosed(c) && (c.stages[LAST].date || '').slice(0, 7) === today().slice(0, 7)).length;
+  const closedThisMonth = db.cases.filter(c => closedDate(c).slice(0, 7) === today().slice(0, 7)).length;
   const alerts = allAlerts();
   const over = db.members.filter(m => m.active && loadOf(m.id) > db.settings.capTarget).length;
 
+  const nSub = open.filter(isSub).length;
   const kpis = `<div class="kpis">
-    <div class="kpi"><div class="n">${open.length}</div><div class="l">진행 중 사건</div></div>
+    <div class="kpi"><div class="n">${open.length}</div><div class="l">진행 중 사건</div>
+      <div class="sub" style="font-size:11px;color:var(--muted)">일반 ${open.length - nSub} · 보완 등 ${nSub}</div></div>
     <div class="kpi"><div class="n" style="color:${over ? 'var(--bad)' : 'var(--ok)'}">${over}</div><div class="l">${db.settings.capTarget}건 초과 인원</div></div>
     <div class="kpi"><div class="n" style="color:${alerts.length ? 'var(--warn)' : 'var(--ok)'}">${alerts.length}</div><div class="l">점검 필요 항목</div></div>
     <div class="kpi"><div class="n">${closedThisMonth}</div><div class="l">이번 달 종결</div></div>
@@ -532,26 +627,27 @@ function viewDash(){
       <div class="mrow"><span class="mrank">${esc(m.rank)}</span><span class="mname">${esc(m.name)}</span>
         <span class="mcount" style="color:${color}">${n}<span style="font-size:12px;color:var(--muted);font-weight:600">/${db.settings.capTarget}</span></span></div>
       <div class="mbar"><i style="width:${pct}%;background:${color}"></i></div>
-      <div class="mmeta">${stalled ? `<span class="pill bad">정체 ${stalled}</span>` : ''}${due ? `<span class="pill warn">기한임박 ${due}</span>` : ''}${(!stalled && !due) ? `<span class="pill ok">이상 없음</span>` : ''}</div>
+      <div class="mmeta">${mine.filter(isSub).length ? `<span class="pill kind-b">보완 등 ${mine.filter(isSub).length}</span>` : ''}${stalled ? `<span class="pill bad">정체 ${stalled}</span>` : ''}${due ? `<span class="pill warn">기한임박 ${due}</span>` : ''}${(!stalled && !due && !mine.filter(isSub).length) ? `<span class="pill ok">이상 없음</span>` : ''}</div>
     </div>`;
   }).join('');
 
   const alertRows = alerts.length ? alerts.slice(0, 25).map(a => `
     <div class="alert-row" data-open="${a.c.id}">
       <span class="pill ${a.lv}">${a.lv === 'bad' ? '긴급' : '주의'}</span>
-      <span class="txt"><b>${esc(a.c.intakeNo || '(접수번호 미입력)')}</b> · ${esc(a.c.charge || '죄명 미입력')}
+      <span class="txt">${kindBadge(a.c)} <b>${esc(a.c.intakeNo || '(접수번호 미입력)')}</b> · ${esc(a.c.charge || '죄명 미입력')}
         <span class="muted">— ${esc(memberLabel(a.c.ownerId))}</span></span>
       <span class="muted" style="font-size:12px;white-space:nowrap">${esc(a.txt)}</span>
     </div>`).join('') : '<div class="empty">점검이 필요한 사건이 없습니다.</div>';
 
   /* 국면(phase)별 분포 — 21단계를 5개 국면으로 묶어 표시 */
-  const byPhase = PHASES.map(p => ({ p, n: open.filter(c => STAGES[c.stageIndex].p === p).length }));
+  const byPhase = PHASES.map(p => ({ p, n: open.filter(c => !isSub(c) && stageOf(c).p === p).length }))
+    .concat(KINDS.filter(k => k.k !== '일반').map(k => ({ p:k.label, n:open.filter(c => kindOf(c) === k.k).length, kind:k.k })));
   const maxP = Math.max(1, ...byPhase.map(d => d.n));
-  const phaseRows = byPhase.map(d => `<div class="distrow" data-phase="${esc(d.p)}">
+  const phaseRows = byPhase.map(d => `<div class="distrow" ${d.kind ? `data-kindjump="${esc(d.kind)}"` : `data-phase="${esc(d.p)}"`}>
       <span class="nm">${esc(d.p)}</span>
       <span class="b"><i style="width:${Math.round(d.n / maxP * 100)}%"></i></span><b>${d.n}</b></div>`).join('');
 
-  const dist = STAGES.map((s, i) => ({ s, i, n: open.filter(c => c.stageIndex === i).length })).filter(d => d.n > 0);
+  const dist = TRACK_GENERAL.map((s, i) => ({ s, i, n: open.filter(c => !isSub(c) && c.stageIndex === i).length })).filter(d => d.n > 0);
   const maxN = Math.max(1, ...dist.map(d => d.n));
   const stageRows = dist.length ? dist.map(d => `<div class="distrow" data-stage="${d.i}">
       <span class="nm" style="width:210px;font-size:12px">${d.i + 1}. ${esc(d.s.n)}</span>
@@ -568,7 +664,7 @@ function viewDash(){
       <div class="card-h"><h2>진행 국면별 분포</h2><span class="sub">진행 중 ${open.length}건</span></div>
       <div class="card-b">${phaseRows}
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-          <div class="muted" style="font-size:11.5px;font-weight:700;margin-bottom:7px">세부 단계</div>${stageRows}</div>
+          <div class="muted" style="font-size:11.5px;font-weight:700;margin-bottom:7px">일반사건 세부 단계</div>${stageRows}</div>
       </div>
     </div>
   </div>
@@ -582,6 +678,7 @@ function viewDash(){
 /* 목록 정렬 기준 — 열 머리글 클릭 시 사용 */
 const SORT_COLS = [
   { k:'intakeNo', label:'접수번호', v:c => c.intakeNo || '' },
+  { k:'kind',     label:'종류',     v:c => KINDS.findIndex(x => x.k === kindOf(c)) },
   { k:'charge',   label:'죄명',     v:c => c.charge || '' },
   { k:'owner',    label:'담당',     v:c => memberLabel(c.ownerId) },
   { k:'stage',    label:'진행 단계', v:c => c.stageIndex },
@@ -607,8 +704,9 @@ function filtered(){
     if(filters.status === 'open'   && isClosed(c)) return false;
     if(filters.status === 'closed' && !isClosed(c)) return false;
     if(filters.owner && c.ownerId !== filters.owner) return false;
+    if(filters.kind === '보완등' ? !isSub(c) : (filters.kind && kindOf(c) !== filters.kind)) return false;
     if(filters.stage !== '' && c.stageIndex !== +filters.stage) return false;
-    if(q && !`${c.intakeNo} ${c.charge} ${c.complainant} ${c.suspect} ${c.memo}`.toLowerCase().includes(q)) return false;
+    if(q && !`${c.intakeNo} ${c.origNo || ''} ${c.charge} ${c.complainant} ${c.suspect} ${c.memo}`.toLowerCase().includes(q)) return false;
     return true;
   }).sort(sort.key ? comparator(sort.key, sort.dir) : (a, b) => {
     const ra = caseAlerts(a).some(x => x.lv === 'bad') ? 0 : 1;
@@ -625,12 +723,14 @@ function viewList(){
   const body = rows.length ? rows.map(c => {
     const al = caseAlerts(c), dd = dueDays(c), st = stallDays(c), pct = progressPct(c);
     return `<tr class="row" data-open="${c.id}">
-      <td><b>${esc(c.intakeNo || '-')}</b><div class="muted" style="font-size:11.5px">${esc(c.type)} · 접수 ${fmt(c.receivedAt)}</div></td>
+      <td><b>${esc(c.intakeNo || '-')}</b><div class="muted" style="font-size:11.5px">${
+        isSub(c) ? `원사건 ${esc(c.origNo || '미입력')}` : esc(c.type)} · ${esc(kindInfo(kindOf(c)).basis)} ${fmt(c.receivedAt)}</div></td>
+      <td>${kindBadge(c)}</td>
       <td>${esc(c.charge || '-')}${c.priority === 'high' ? ' <span class="pill bad">중요</span>' : ''}</td>
       <td>${esc(memberLabel(c.ownerId))}</td>
       <td style="min-width:230px">
-        <div style="font-size:12.5px;font-weight:600">${c.stageIndex + 1}. ${esc(STAGES[c.stageIndex].n)}</div>
-        <div class="muted" style="font-size:11px">${esc(STAGES[c.stageIndex].p)} · ${pct}%</div>
+        <div style="font-size:12.5px;font-weight:600">${c.stageIndex + 1}. ${esc(stageOf(c).n)}</div>
+        <div class="muted" style="font-size:11px">${esc(stageOf(c).p)} · ${pct}%</div>
         <span style="display:block;height:5px;background:#e6ebf3;border-radius:3px;margin-top:3px;overflow:hidden">
           <i style="display:block;height:100%;width:${pct}%;background:${isClosed(c) ? 'var(--ok)' : 'var(--accent)'}"></i></span></td>
       <td>${st === null ? '-' : `<span class="pill ${st >= db.settings.stallDays ? 'bad' : 'neutral'}">${st}일</span>`}</td>
@@ -648,9 +748,17 @@ function viewList(){
         <option value=""       ${filters.status === '' ? 'selected' : ''}>전체</option></select>
       <select data-f="owner"><option value="">담당자 전체</option>
         ${opts(db.members.filter(m => m.active), filters.owner, m => m.id, m => `${m.rank} ${m.name} (${loadOf(m.id)})`)}</select>
+      <select data-f="kind">
+        <option value="" ${filters.kind === '' ? 'selected' : ''}>종류 전체</option>
+        <option value="일반" ${filters.kind === '일반' ? 'selected' : ''}>일반사건</option>
+        <option value="보완등" ${filters.kind === '보완등' ? 'selected' : ''}>보완 등 사건 (전체)</option>
+        <option value="보완" ${filters.kind === '보완' ? 'selected' : ''}>&nbsp;&nbsp;— 보완수사요구</option>
+        <option value="재수사" ${filters.kind === '재수사' ? 'selected' : ''}>&nbsp;&nbsp;— 재수사요청</option>
+      </select>
       <select data-f="stage"><option value="">단계 전체</option>
-        ${opts(STAGES, filters.stage, (s, i) => i, (s, i) => `${i + 1}. ${s.n}`)}</select>
-      <input type="text" data-f="q" placeholder="접수번호 · 죄명 · 당사자 · 메모 검색" value="${esc(filters.q)}">
+        ${opts(TRACKS[filters.kind && filters.kind !== '보완등' ? filters.kind : '일반'],
+            filters.stage, (s, i) => i, (s, i) => `${i + 1}. ${s.n}`)}</select>
+      <input type="text" data-f="q" placeholder="접수번호 · 원사건번호 · 죄명 · 당사자 · 메모" value="${esc(filters.q)}">
       ${sort.key ? `<button class="btn ghost sm" data-sort-reset>기본 정렬로</button>` : ''}
       <span class="right muted">${sort.key
         ? `${esc(SORT_COLS.find(c => c.k === sort.key).label)} ${sort.dir === 1 ? '오름차순' : '내림차순'} · ${rows.length}건`
@@ -667,8 +775,9 @@ function renderDetail(){
   const c = caseById(openCaseId);
   if(!c){ openCaseId = null; $('#modal-root').innerHTML = ''; return; }
 
+  const TRACK = stagesOf(c);
   let lastPhase = '';
-  const steps = STAGES.map((s, i) => {
+  const steps = TRACK.map((s, i) => {
     const st = c.stages[i];
     const cur = c.stageIndex === i && !isClosed(c);
     const notes = c.notes.filter(n => n.stage === i);
@@ -707,9 +816,10 @@ function renderDetail(){
   const al = caseAlerts(c), dd = dueDays(c);
   const info = [
     ['죄명', esc(c.charge || '-')],
-    ['사건 구분', esc(c.type)],
+    ['사건 종류', `${kindBadge(c)}${kindInfo(kindOf(c)).note ? ` <span class="muted" style="font-size:11px">${esc(kindInfo(kindOf(c)).note)}</span>` : ''}`],
+    ...(isSub(c) ? [['원사건 접수번호', esc(c.origNo || '-')]] : [['사건 구분', esc(c.type)]]),
     ['담당', esc(memberLabel(c.ownerId))],
-    ['접수일', fmt(c.receivedAt) + (daysSince(c.receivedAt) !== null ? ` <span class="muted">(${daysSince(c.receivedAt)}일 경과)</span>` : '')],
+    [kindInfo(kindOf(c)).basis, fmt(c.receivedAt) + (daysSince(c.receivedAt) !== null ? ` <span class="muted">(${daysSince(c.receivedAt)}일 경과)</span>` : '')],
     ['처리기한', c.dueAt ? fmt(c.dueAt) + (dd === null ? '' : dd < 0 ? ` <span style="color:var(--bad)">(${-dd}일 경과)</span>` : ` <span class="muted">(D-${dd})</span>`) : '-'],
     ['고소인/진정인', esc(c.complainant || '-')],
     ['피의자', esc(c.suspect || '-')],
@@ -721,7 +831,8 @@ function renderDetail(){
     <div class="modal xl" role="dialog">
       <div class="modal-h">
         <h3>${esc(c.intakeNo || '(접수번호 미입력)')}</h3>
-        <span class="pill ${isClosed(c) ? 'ok' : 'accent'}">${esc(isClosed(c) ? (c.disposition || '종결') : STAGES[c.stageIndex].n)}</span>
+        ${kindBadge(c)}
+        <span class="pill ${isClosed(c) ? 'ok' : 'accent'}">${esc(isClosed(c) ? (c.disposition || '종결') : stageOf(c).n)}</span>
         ${c.priority === 'high' ? '<span class="pill bad">중요</span>' : ''}
         <button class="btn ghost sm right" data-edit="${c.id}">수정</button>
         <button class="btn ghost sm" data-close>닫기</button>
@@ -755,11 +866,12 @@ function renderDetail(){
 
 /* 종결 구분 선택 */
 function renderDisposition(caseId){
+  const c = caseById(caseId);
   $('#modal-root').innerHTML = `<div class="mask">
-    <div class="modal" style="max-width:440px">
-      <div class="modal-h"><h3>종결 구분 선택</h3><button class="btn ghost sm right" data-dispo-cancel>취소</button></div>
+    <div class="modal" style="max-width:460px">
+      <div class="modal-h"><h3>종결 구분 선택</h3>${kindBadge(c)}<button class="btn ghost sm right" data-dispo-cancel>취소</button></div>
       <div class="modal-b"><div class="choices">
-        ${DISPOSITIONS.map(d => `<button class="choice" data-dispo="${esc(d.v)}" data-dispo-case="${caseId}">
+        ${dispoOf(c).map(d => `<button class="choice" data-dispo="${esc(d.v)}" data-dispo-case="${caseId}">
           <b>${esc(d.v)}</b><span>${esc(d.d)}</span></button>`).join('')}
       </div></div></div></div>`;
 }
@@ -770,11 +882,18 @@ function renderForm(c, isNew){
     `<option value="${v(x, i)}" ${String(v(x, i)) === String(sel) ? 'selected' : ''}>${esc(l(x, i))}</option>`).join('');
   $('#modal-root').innerHTML = `<div class="mask" data-close-mask>
     <div class="modal">
-      <div class="modal-h"><h3>${isNew ? '사건 접수' : '사건 수정'}</h3><button class="btn ghost sm right" data-close>닫기</button></div>
+      <div class="modal-h"><h3>${isNew ? '사건 접수' : '사건 수정'}</h3>${kindBadge(c)}<button class="btn ghost sm right" data-close>닫기</button></div>
       <div class="modal-b">
+        <label class="f"><span>사건 종류</span>
+          <select data-k="kind" data-kind-sel>
+            ${KINDS.map(k => `<option value="${k.k}" ${kindOf(c) === k.k ? 'selected' : ''}>${esc(k.label)}${k.note ? ` (${esc(k.note)})` : ''}</option>`).join('')}
+          </select>
+          <span class="muted" style="font-size:11px" data-kind-hint></span></label>
         <div class="two">
           <label class="f"><span>접수번호</span><input type="text" data-k="intakeNo" value="${esc(c.intakeNo)}" placeholder="2026-001234"></label>
-          <label class="f"><span>사건 구분</span><select data-k="type">${opt(CASE_TYPES, c.type, x => x, x => x)}</select></label>
+          <label class="f" data-only="일반"><span>사건 구분</span><select data-k="type">${opt(CASE_TYPES, c.type, x => x, x => x)}</select></label>
+          <label class="f" data-only="보완등"><span>원사건 접수번호</span>
+            <input type="text" data-k="origNo" value="${esc(c.origNo || '')}" placeholder="보완·재수사 대상이 된 원사건"></label>
         </div>
         <label class="f"><span>죄명</span><input type="text" data-k="charge" value="${esc(c.charge)}" placeholder="사기, 절도, 명예훼손 …"></label>
         <div class="two">
@@ -784,10 +903,10 @@ function renderForm(c, isNew){
             <option value="high"   ${c.priority === 'high' ? 'selected' : ''}>중요</option></select></label>
         </div>
         <div class="two">
-          <label class="f"><span>접수일</span><input type="date" data-k="receivedAt" value="${esc(c.receivedAt)}"></label>
+          <label class="f"><span data-basis-label>접수일</span><input type="date" data-k="receivedAt" value="${esc(c.receivedAt)}"></label>
           <label class="f"><span>처리기한 (수사기일)</span>
             <input type="date" data-k="dueAt" value="${esc(c.dueAt)}"
-              ${(!c.dueAt || c.dueAt === addDays(c.receivedAt, db.settings.dueDefaultDays)) ? 'data-auto-due="1"' : ''}>
+              ${(!c.dueAt || c.dueAt === addDays(c.receivedAt, dueDaysOf(kindOf(c)))) ? 'data-auto-due="1"' : ''}>
             <span class="muted" style="font-size:11px" data-due-hint></span></label>
         </div>
         <div class="two">
@@ -803,7 +922,7 @@ function renderForm(c, isNew){
     </div></div>`;
   $('#modal-root').dataset.newCase = isNew ? '1' : '';
   $('#modal-root').dataset.draft = JSON.stringify(c);
-  syncDueField();
+  syncKindFields(); syncDueField();
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -818,7 +937,7 @@ const ymLabel  = m => `${+m.slice(5, 7)}월`;
 const ymFull   = m => `${m.slice(0, 4)}. ${m.slice(5, 7)}`;
 const monthEnd = m => { const [y, mm] = m.split('-').map(Number);
   return new Date(Date.UTC(y, mm, 0)).toISOString().slice(0, 10); };
-const closedAt = c => isClosed(c) ? (c.stages[LAST].date || '') : '';
+const closedAt = c => closedDate(c);
 
 /* 최근 n개월의 'YYYY-MM' 목록 (오래된 달 → 최근 달) */
 function monthList(n){
@@ -989,7 +1108,10 @@ function viewStats(){
   const typeRows   = countBy(pool.filter(c => rows.some(r => r.m === ym(c.receivedAt))), c => c.type);
   const chargeRows = countBy(pool.filter(c => rows.some(r => r.m === ym(c.receivedAt))), c => c.charge, 7);
   const dispoRows  = countBy(closedInRange, c => c.disposition || '구분 미지정');
-  const stageRows  = PHASES.map(ph => ({ k:ph, n:open.filter(c => STAGES[c.stageIndex].p === ph).length })).filter(r => r.n);
+  const stageRows  = PHASES.map(ph => ({ k:ph, n:open.filter(c => !isSub(c) && stageOf(c).p === ph).length }))
+    .concat(KINDS.filter(k => k.k !== '일반').map(k => ({ k:k.label, n:open.filter(c => kindOf(c) === k.k).length })))
+    .filter(r => r.n);
+  const kindRows = KINDS.map(k => ({ k:k.label, n:pool.filter(c => rows.some(r => r.m === ym(c.receivedAt)) && kindOf(c) === k.k).length })).filter(r => r.n);
 
   return `
   <div class="card" style="margin-bottom:14px">
@@ -1053,8 +1175,10 @@ function viewStats(){
 
   <div class="grid" style="grid-template-columns:1fr 1fr; margin-bottom:14px">
     <div class="card">
-      <div class="card-h"><h2>접수 현황 — 사건 구분별</h2><span class="sub">기간 내 접수 ${sumTaken}건</span></div>
-      <div class="card-b">${chartBars(typeRows, { label:'사건 구분별 접수 건수', nameW:84, unit:'건', total:sumTaken })}</div>
+      <div class="card-h"><h2>접수 현황 — 종류 · 구분별</h2><span class="sub">기간 내 접수 ${sumTaken}건</span></div>
+      <div class="card-b">${chartBars(kindRows, { label:'사건 종류별 접수 건수', nameW:96, unit:'건', total:sumTaken })}
+        <div style="margin:12px 0 8px;border-top:1px solid var(--line)"></div>
+        ${chartBars(typeRows, { label:'사건 구분별 접수 건수', nameW:96, unit:'건', total:sumTaken })}</div>
     </div>
     <div class="card">
       <div class="card-h"><h2>접수 현황 — 죄명별</h2><span class="sub">상위 7개 · 나머지는 기타</span></div>
@@ -1103,12 +1227,12 @@ function viewReport(){
   const byMember = db.members.filter(m => m.active).map(m => ({
     m, list: open.filter(c => c.ownerId === m.id).sort((a, b) => (a.dueAt || '9999') < (b.dueAt || '9999') ? -1 : 1)
   }));
-  const closedRecent = db.cases.filter(c => isClosed(c) && (daysSince(c.stages[LAST].date) ?? 999) <= 7);
+  const closedRecent = db.cases.filter(c => isClosed(c) && (daysSince(closedDate(c)) ?? 999) <= 7);
   const tbl = list => list.length ? `<table>
     <thead><tr><th style="width:110px">접수번호</th><th>죄명</th><th style="width:210px">진행 단계</th>
       <th style="width:70px">단계경과</th><th style="width:100px">기한</th><th style="width:150px">비고</th></tr></thead>
     <tbody>${list.map(c => `<tr class="row" data-open="${c.id}"><td>${esc(c.intakeNo || '-')}</td><td>${esc(c.charge || '-')}</td>
-        <td>${c.stageIndex + 1}. ${esc(STAGES[c.stageIndex].n)}</td><td>${stallDays(c) ?? '-'}일</td>
+        <td>${kindBadge(c)} ${c.stageIndex + 1}. ${esc(stageOf(c).n)}</td><td>${stallDays(c) ?? '-'}일</td>
         <td>${c.dueAt ? fmt(c.dueAt) : '-'}</td>
         <td>${caseAlerts(c).map(x => esc(x.txt)).join(', ') || '정상'}</td></tr>`).join('')}</tbody></table>`
     : '<div class="muted" style="padding:6px 0;font-size:12.5px">보유 사건 없음</div>';
@@ -1134,8 +1258,8 @@ function viewReport(){
         <table><thead><tr><th style="width:110px">접수번호</th><th>죄명</th><th style="width:120px">담당</th>
           <th style="width:90px">접수일</th><th style="width:90px">종결일</th><th style="width:80px">처리기간</th><th style="width:100px">종결 구분</th></tr></thead>
         <tbody>${closedRecent.map(c => `<tr class="row" data-open="${c.id}"><td>${esc(c.intakeNo || '-')}</td><td>${esc(c.charge || '-')}</td>
-          <td>${esc(memberLabel(c.ownerId))}</td><td>${fmt(c.receivedAt)}</td><td>${fmt(c.stages[LAST].date)}</td>
-          <td>${daysBetween(c.receivedAt, c.stages[LAST].date) ?? '-'}일</td><td>${esc(c.disposition || '-')}</td></tr>`).join('')}</tbody></table>` : ''}
+          <td>${esc(memberLabel(c.ownerId))}</td><td>${fmt(c.receivedAt)}</td><td>${fmt(closedDate(c))}</td>
+          <td>${daysBetween(c.receivedAt, closedDate(c)) ?? '-'}일</td><td>${esc(c.disposition || '-')}</td></tr>`).join('')}</tbody></table>` : ''}
     </div></div>`;
 }
 
@@ -1265,6 +1389,8 @@ const FIELDS = [
   { k:'dueAt',       label:'처리기한',        alias:['기한','처리기한','수사기일','만료일','처리기일','완료기한'] },
   { k:'complainant', label:'고소인/진정인',   alias:['고소인','진정인','피해자','고소인(진정인)','신고인'] },
   { k:'suspect',     label:'피의자',          alias:['피의자','피혐의자','피(혐)의자','상대방','피고소인'] },
+  { k:'kindName',    label:'사건 종류',       alias:['종류','사건종류','보완재수사','요구구분'] },
+  { k:'origNo',      label:'원사건 접수번호', alias:['원사건번호','원사건접수번호','원접수번호','본사건번호'] },
   { k:'stageName',   label:'진행 단계',       alias:['단계','진행단계','진행상황','진행상태','수사단계','진행'] },
   { k:'priority',    label:'중요도',          alias:['중요도','우선순위','등급','지연'] },
   { k:'memo',        label:'메모',            alias:['메모','비고','특이사항','내용','요지'] }
@@ -1330,14 +1456,22 @@ function matchMember(name){
       || act.find(m => n.includes(norm(m.name)) || norm(`${m.rank}${m.name}`) === n)
       || null;
 }
-function matchStage(v){
+function matchKind(v){
+  const n = norm(v);
+  if(!n) return '일반';
+  if(/재수사/.test(n)) return '재수사';
+  if(/보완/.test(n)) return '보완';
+  return '일반';
+}
+function matchStage(v, kind = '일반'){
+  const T = TRACKS[kind] || TRACK_GENERAL, L = T.length - 1;
   const n = norm(v);
   if(!n) return 0;
-  if(/^\d+$/.test(n)){ const i = +n - 1; return (i >= 0 && i <= LAST) ? i : 0; }
-  if(STAGE_ALIAS[n] !== undefined) return STAGE_ALIAS[n];
-  let i = STAGES.findIndex(s => norm(s.n) === n);
-  if(i < 0) i = STAGES.findIndex(s => norm(s.n).includes(n) || n.includes(norm(s.n)));
-  if(i < 0){
+  if(/^\d+$/.test(n)){ const i = +n - 1; return (i >= 0 && i <= L) ? i : 0; }
+  if(kind === '일반' && STAGE_ALIAS[n] !== undefined) return STAGE_ALIAS[n];
+  let i = T.findIndex(s => norm(s.n) === n);
+  if(i < 0) i = T.findIndex(s => norm(s.n).includes(n) || n.includes(norm(s.n)));
+  if(i < 0 && kind === '일반'){
     const key = Object.keys(STAGE_ALIAS).find(k => n.includes(k));
     if(key) return STAGE_ALIAS[key];
   }
@@ -1363,8 +1497,10 @@ function startImport(rows, fileName){
 function buildRows(){
   const g = (r, k) => { const i = imp.map[k]; return i >= 0 ? (r[i] ?? '') : ''; };
   const seen = new Set();
-  /* 연결된 항목이 하나도 없는 줄은 자료가 아니라 구분선·쪽번호·발행일 같은 장식이므로 조용히 버린다 */
-  const body = imp.body.filter(r => FIELDS.some(f => String(g(r, f.k) ?? '').trim() !== ''));
+  /* 사건을 가리키는 항목이 하나도 없는 줄은 자료가 아니라 구분선·쪽번호·발행일 같은 장식이므로 버린다.
+     단계·중요도·메모 같은 부수 항목만 채워진 줄도 사건으로 보지 않는다 */
+  const ID_FIELDS = ['intakeNo', 'origNo', 'charge', 'suspect', 'complainant', 'ownerName'];
+  const body = imp.body.filter(r => ID_FIELDS.some(k => String(g(r, k) ?? '').trim() !== ''));
   return body.map(r => {
     const sp = splitIntakeNo(g(r, 'intakeNo'));
     const intakeNo = sp.no;
@@ -1378,16 +1514,18 @@ function buildRows(){
     const err = (!intakeNo && !charge) ? '접수번호·죄명이 모두 비어 있음' : '';
     /* 접수일 열이 없으면 접수번호 괄호 안의 월-일을 쓴다 */
     const rec = toDate(g(r, 'receivedAt')) || sp.date || today();
+    const kind = matchKind(g(r, 'kindName'));
     return {
       intakeNo, charge,
       type: CASE_TYPES.includes(typeRaw) ? typeRaw : '고소',
       ownerId: m ? m.id : imp.defaultOwner,
       ownerRaw, ownerMatched: !!m,
+      kind, origNo: String(g(r, 'origNo')).trim(),
       receivedAt: rec,
-      dueAt: toDate(g(r, 'dueAt')) || addDays(rec, db.settings.dueDefaultDays),
+      dueAt: toDate(g(r, 'dueAt')) || addDays(rec, dueDaysOf(kind)),
       complainant: String(g(r, 'complainant')).trim(),
       suspect: String(g(r, 'suspect')).trim(),
-      stageIndex: matchStage(g(r, 'stageName')),
+      stageIndex: matchStage(g(r, 'stageName'), kind),
       priority: /중요|긴급|높|high|[●◎○]/i.test(String(g(r, 'priority'))) ? 'high' : 'normal',
       memo: String(g(r, 'memo')).trim(),
       err, dup: dupInDb || dupInFile
@@ -1429,13 +1567,14 @@ function renderImport(){
         </div>
         <div class="prev"><table>
           <thead><tr><th>#</th><th>접수번호</th><th>죄명</th><th>담당</th><th>구분</th><th>접수일</th><th>기한</th>
-            <th>고소인</th><th>피의자</th><th>진행 단계</th><th>비고</th></tr></thead>
+            <th>고소인</th><th>피의자</th><th>종류</th><th>진행 단계</th><th>비고</th></tr></thead>
           <tbody>${rows.slice(0, 200).map((r, i) => `<tr class="${r.err ? 'bad-row' : (imp.skipDup && r.dup) ? 'dup-row' : ''}">
             <td class="muted">${i + 1}</td><td>${esc(r.intakeNo)}</td><td>${esc(r.charge)}</td>
             <td>${esc(memberLabel(r.ownerId))}${!r.ownerMatched && r.ownerRaw ? ` <span class="pill warn">${esc(r.ownerRaw)}?</span>` : ''}</td>
             <td>${esc(r.type)}</td><td>${esc(r.receivedAt)}</td><td>${esc(r.dueAt) || '-'}</td>
             <td>${esc(r.complainant)}</td><td>${esc(r.suspect)}</td>
-            <td>${r.stageIndex + 1}. ${esc(STAGES[r.stageIndex].n)}</td>
+            <td>${esc(kindInfo(r.kind).label)}</td>
+            <td>${r.stageIndex + 1}. ${esc(TRACKS[r.kind][r.stageIndex].n)}</td>
             <td>${r.err ? `<span class="pill bad">${esc(r.err)}</span>` : r.dup ? `<span class="pill warn">중복</span>` : ''}</td></tr>`).join('')}
           </tbody></table></div>
         ${rows.length > 200 ? `<div class="muted" style="font-size:12px;margin-top:6px">앞 200행만 미리보기로 표시합니다. 가져오기는 전체 ${rows.length}행에 적용됩니다.</div>` : ''}
@@ -1451,9 +1590,9 @@ function renderImport(){
 function runImport(){
   const rows = buildRows().filter(r => !r.err && !(imp.skipDup && r.dup));
   rows.forEach(r => {
-    const c = newCase();
+    const c = newCase(r.kind);
     Object.assign(c, {
-      intakeNo:r.intakeNo, charge:r.charge, type:r.type, ownerId:r.ownerId,
+      kind:r.kind, origNo:r.origNo, intakeNo:r.intakeNo, charge:r.charge, type:r.type, ownerId:r.ownerId,
       receivedAt:r.receivedAt, dueAt:r.dueAt, complainant:r.complainant,
       suspect:r.suspect, priority:r.priority, memo:r.memo
     });
@@ -1498,15 +1637,20 @@ function viewMembers(){
           보유 사건이 있는 팀원은 삭제되지 않습니다. 전출 시 <b>재직</b> 체크만 해제하세요.</div>
       </div>
       <div class="card" style="margin-top:14px">
-        <div class="card-h"><h2>수사 진행 단계</h2><span class="sub">전체 ${STAGES.length}단계 · 팀장 검토 ${STAGES.filter(x => x.review).length}개 · 선택 ${STAGES.filter(x => x.opt).length}개</span></div>
+        <div class="card-h"><h2>사건 종류별 진행 단계</h2><span class="sub">종류마다 단계 구성이 다릅니다</span></div>
         <div class="card-b" style="font-size:12.5px">
-          ${PHASES.map(p => `<div style="margin-bottom:9px">
-            <div style="font-size:11px;font-weight:800;color:var(--accent);margin-bottom:3px">${esc(p)}</div>
-            ${STAGES.map((x, i) => ({ x, i })).filter(o => o.x.p === p).map(o =>
-              `<div style="padding:1px 0">${o.i + 1}. ${esc(o.x.n)}
-                ${o.x.review ? '<span class="pill accent">팀장 검토</span>' : ''}
-                ${o.x.opt ? '<span class="pill neutral">선택</span>' : ''}
-                ${o.x.branch ? '<span class="pill warn">분기</span>' : ''}</div>`).join('')}</div>`).join('')}
+          ${KINDS.map(K => `<div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+              <span class="pill ${K.k === '일반' ? 'neutral' : K.k === '보완' ? 'kind-b' : 'kind-j'}">${esc(K.label)}</span>
+              <span class="muted" style="font-size:11px">${TRACKS[K.k].length}단계 · 기한 ${esc(K.basis)} + ${dueDaysOf(K.k)}일${K.note ? ' · ' + esc(K.note) : ''}</span></div>
+            ${phasesOf(K.k).map(p => `<div style="margin-bottom:7px">
+              <div style="font-size:11px;font-weight:800;color:var(--accent);margin-bottom:2px">${esc(p)}</div>
+              ${TRACKS[K.k].map((x, i) => ({ x, i })).filter(o => o.x.p === p).map(o =>
+                `<div style="padding:1px 0">${o.i + 1}. ${esc(o.x.n)}
+                  ${o.x.review ? '<span class="pill accent">팀장 검토</span>' : ''}
+                  ${o.x.opt ? '<span class="pill neutral">선택</span>' : ''}
+                  ${o.x.branch ? '<span class="pill warn">분기</span>' : ''}</div>`).join('')}</div>`).join('')}
+          </div>`).join('')}
           <div class="muted" style="margin-top:6px;padding-top:9px;border-top:1px solid var(--line)">
             <b>선택</b> 단계는 사건마다 <b>해당없음</b>으로 뺄 수 있고, 진행률 계산에서 제외됩니다.<br>
             <b>분기</b> 단계에서 타 관서 관할로 확인되면 종결 구분을 <b>타관서 이송</b>으로 선택해 종결합니다.</div>
@@ -1521,7 +1665,16 @@ function viewMembers(){
           <label class="f"><span>주의 기준 건수 (이 수부터 노란색)</span><input type="number" data-s="capWarn" value="${s.capWarn}" min="1"></label>
           <label class="f"><span>단계 정체 경보 기준 (일)</span><input type="number" data-s="stallDays" value="${s.stallDays}" min="1"></label>
           <label class="f"><span>기한 임박 경보 기준 (일)</span><input type="number" data-s="dueSoonDays" value="${s.dueSoonDays}" min="1"></label>
-          <label class="f"><span>처리기한 기본 일수 (접수일 + N일)</span><input type="number" data-s="dueDefaultDays" value="${s.dueDefaultDays}" min="1"></label>
+          <div style="margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--line)">
+            <div class="muted" style="font-size:12px;font-weight:700">사건 종류별 처리기한</div>
+            <div class="muted" style="font-size:11px;margin-bottom:9px">
+              기본값은 개정 형사소송법·수사준칙을 전제로 넣어 둔 값입니다.
+              <b>수사실무지침과 다르면 여기서 고치세요.</b></div></div>
+          <label class="f"><span>일반사건 — 접수일 + N일</span><input type="number" data-s="dueDefaultDays" value="${s.dueDefaultDays}" min="1"></label>
+          <label class="f"><span>보완수사요구 — 요구받은 날 + N일 <span style="font-weight:400">(형소법 §197-2)</span></span>
+            <input type="number" data-s="dueBowanDays" value="${s.dueBowanDays}" min="1"></label>
+          <label class="f"><span>재수사요청 — 요청받은 날 + N일 <span style="font-weight:400">(형소법 §245-8)</span></span>
+            <input type="number" data-s="dueJaesusaDays" value="${s.dueJaesusaDays}" min="1"></label>
           <button class="btn" data-s-save>기준 저장</button>
         </div>
       </div>
@@ -1558,11 +1711,11 @@ function doBackup(){
   render();
 }
 function doCsv(){
-  const head = ['접수번호','구분','죄명','담당','접수일','처리기한','현재단계','진행률(%)','단계경과(일)','상태','종결구분','고소인','피의자','메모'];
+  const head = ['접수번호','종류','원사건번호','구분','죄명','담당','접수일','처리기한','현재단계','진행률(%)','단계경과(일)','상태','종결구분','고소인','피의자','메모'];
   const lines = [head.join(',')];
   db.cases.forEach(c => lines.push([
-    c.intakeNo, c.type, c.charge, memberLabel(c.ownerId), c.receivedAt, c.dueAt,
-    `${c.stageIndex + 1}. ${STAGES[c.stageIndex].n}`, progressPct(c), stallDays(c) ?? '',
+    c.intakeNo, kindInfo(kindOf(c)).label, c.origNo || '', c.type, c.charge, memberLabel(c.ownerId), c.receivedAt, c.dueAt,
+    `${c.stageIndex + 1}. ${stageOf(c).n}`, progressPct(c), stallDays(c) ?? '',
     isClosed(c) ? '종결' : '진행', c.disposition, c.complainant, c.suspect, (c.memo || '').replace(/\n/g, ' ')
   ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')));
   download(`team8-cases-${today()}.csv`, '﻿' + lines.join('\r\n'), 'text/csv;charset=utf-8');
@@ -1576,6 +1729,7 @@ function doRestore(file){
       if(!confirm(`복원하면 현재 데이터(사건 ${db.cases.length}건)가 백업 파일의 내용(사건 ${next.cases.length}건)으로 완전히 대체됩니다.\n계속할까요?`)) return;
       db = migrate(next);
       db.settings = Object.assign(defaultDb().settings, db.settings || {});
+      normalizeCases(db);
       save(); openCaseId = null; $('#modal-root').innerHTML = ''; render();
       alert('복원했습니다.');
     }catch(e){ alert('복원 실패: ' + e.message); }
@@ -1585,7 +1739,7 @@ function doRestore(file){
 
 /* ══════════ 이벤트 ══════════ */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-tab],[data-open],[data-owner],[data-stage],[data-phase],[data-act],[data-close],[data-close-mask],[data-edit],[data-del],[data-stage-set],[data-stage-undo],[data-stage-skip],[data-stage-done],[data-note-add],[data-note-del],[data-ack],[data-memo-save],[data-save-case],[data-m-add],[data-m-del],[data-s-save],[data-sort],[data-sort-reset],[data-st-csv],[data-imp-cancel],[data-imp-run],[data-imp-template],[data-dispo],[data-dispo-cancel]');
+  const t = e.target.closest('[data-tab],[data-open],[data-owner],[data-stage],[data-phase],[data-kindjump],[data-act],[data-close],[data-close-mask],[data-edit],[data-del],[data-stage-set],[data-stage-undo],[data-stage-skip],[data-stage-done],[data-note-add],[data-note-del],[data-ack],[data-memo-save],[data-save-case],[data-m-add],[data-m-del],[data-s-save],[data-sort],[data-sort-reset],[data-st-csv],[data-imp-cancel],[data-imp-run],[data-imp-template],[data-dispo],[data-dispo-cancel]');
   if(!t) return;
   const d = t.dataset;
   const c = openCaseId ? caseById(openCaseId) : null;
@@ -1603,7 +1757,8 @@ document.addEventListener('click', e => {
   if(d.close !== undefined){ openCaseId = null; $('#modal-root').innerHTML = ''; return; }
   if(d.open){ openCaseId = d.open; renderDetail(); return; }
   if(d.owner){ view = 'list'; filters.owner = d.owner; filters.stage = ''; filters.status = 'open'; render(); return; }
-  if(d.phase){ view = 'list'; filters.stage = ''; filters.status = 'open'; render(); return; }
+  if(d.phase){ view = 'list'; filters.stage = ''; filters.kind = '일반'; filters.status = 'open'; render(); return; }
+  if(d.kindjump){ view = 'list'; filters.stage = ''; filters.kind = d.kindjump; filters.status = 'open'; render(); return; }
   if(d.stage !== undefined && d.stageSet === undefined && d.stageUndo === undefined
      && d.stageSkip === undefined && d.stageDone === undefined){
     view = 'list'; filters.stage = d.stage; filters.status = 'open'; render(); return; }
@@ -1628,7 +1783,7 @@ document.addEventListener('click', e => {
   if(d.dispoCancel !== undefined){ $('#modal-root').innerHTML = ''; if(openCaseId) renderDetail(); return; }
   if(d.dispo){
     const target = caseById(d.dispoCase);
-    if(target){ setStage(target, LAST); target.disposition = d.dispo; save(); }
+    if(target){ setStage(target, lastOf(target)); target.disposition = d.dispo; save(); }
     openCaseId = d.dispoCase; render(); renderDetail(); return;
   }
 
@@ -1641,6 +1796,8 @@ document.addEventListener('click', e => {
     if(!draft.intakeNo.trim() && !draft.charge.trim()){ alert('접수번호 또는 죄명 중 하나는 입력해 주세요.'); return; }
     draft.updatedAt = today();
     if(isNew){
+      if(kindOf(draft) !== (draft.kind || '일반')) draft.kind = draft.kind || '일반';
+      draft.stages = TRACKS[kindOf(draft)].map(() => ({ done:false, date:'', skip:false }));
       draft.stages[0].done = true; draft.stages[0].date = draft.receivedAt || today();
       draft.stageEnteredAt = draft.receivedAt || today();
       db.cases.push(draft); save();
@@ -1651,7 +1808,12 @@ document.addEventListener('click', e => {
       openCaseId = draft.id; render(); renderDetail();
     }else{
       const idx = db.cases.findIndex(x => x.id === draft.id);
-      db.cases[idx] = Object.assign(db.cases[idx], draft);
+      const target = db.cases[idx];
+      const kindChanged = kindOf(target) !== kindOf(draft);
+      if(kindChanged && !confirm('사건 종류를 바꾸면 단계 구성이 달라져 진행 상황과 팀장 의견이 초기화됩니다.\n계속할까요?')) return;
+      delete draft.stages; delete draft.stageIndex; delete draft.stageEnteredAt;
+      Object.assign(target, draft);
+      if(kindChanged) resetTrack(target);
       save(); $('#modal-root').innerHTML = ''; render();
       if(openCaseId) renderDetail();
     }
@@ -1668,7 +1830,7 @@ document.addEventListener('click', e => {
   /* 단계 */
   if(d.stageSet !== undefined && c){
     const i = +d.stageSet;
-    if(i === LAST){ renderDisposition(c.id); return; }
+    if(i === lastOf(c)){ renderDisposition(c.id); return; }
     setStage(c, i); render(); renderDetail(); return;
   }
   if(d.stageUndo !== undefined && c){ setStage(c, +d.stageUndo); render(); renderDetail(); return; }
@@ -1677,7 +1839,7 @@ document.addEventListener('click', e => {
 
   /* 팀장 의견 */
   if(d.noteAdd !== undefined && c){
-    const txt = prompt(`[${STAGES[+d.noteAdd].n}] 단계 팀장 의견을 입력하세요.\n(수사 방향, 보완 지시, 검토 사항 등)`);
+    const txt = prompt(`[${stagesOf(c)[+d.noteAdd].n}] 단계 팀장 의견을 입력하세요.\n(수사 방향, 보완 지시, 검토 사항 등)`);
     if(txt && txt.trim()){
       c.notes.push({ id:uid(), stage:+d.noteAdd, text:txt.trim(), at:today(), ack:false, ackAt:'' });
       c.updatedAt = today(); save(); render(); renderDetail(); }
@@ -1708,7 +1870,8 @@ document.addEventListener('click', e => {
 });
 
 /* 상단 버튼 */
-$('#btn-new').onclick = () => renderForm(newCase(), true);
+$('#btn-new').onclick = () => renderForm(newCase('일반'), true);
+$('#btn-new-sub').onclick = () => renderForm(newCase('보완'), true);
 $('#btn-backup').onclick = doBackup;
 $('#btn-xls').onclick = () => $('#file-xls').click();
 $('#file-import').onchange = e => { if(e.target.files[0]) doRestore(e.target.files[0]); e.target.value = ''; };
@@ -1720,20 +1883,38 @@ $('#file-xls').onchange = async e => {
 };
 
 /* 입력 반영 */
-/* 처리기한은 접수일 + 기본일수로 자동 계산하되, 사용자가 직접 고치면 그 값을 유지한다 */
+/* 선택한 사건 종류에 맞춰 폼의 항목과 안내를 바꾼다 */
+function syncKindFields(){
+  const sel = $('#modal-root [data-kind-sel]');
+  if(!sel) return;
+  const k = sel.value, info = kindInfo(k), sub = k !== '일반';
+  $$('#modal-root [data-only]').forEach(el => {
+    el.style.display = (el.dataset.only === '보완등') === sub ? '' : 'none';
+  });
+  const bl = $('#modal-root [data-basis-label]');
+  if(bl) bl.textContent = info.basis;
+  const kh = $('#modal-root [data-kind-hint]');
+  if(kh) kh.textContent = sub
+    ? `${info.note} · 기한 ${info.basis} + ${dueDaysOf(k)}일`
+    : `기한 접수일 + ${dueDaysOf(k)}일`;
+}
+/* 처리기한은 기준일 + 종류별 일수로 자동 계산하되, 사용자가 직접 고치면 그 값을 유지한다 */
 function syncDueField(){
   const due = $('#modal-root [data-k="dueAt"]');
   const hint = $('#modal-root [data-due-hint]');
   if(!due) return;
+  const sel = $('#modal-root [data-kind-sel]');
+  const k = sel ? sel.value : '일반';
   if(hint) hint.textContent = due.dataset.autoDue === '1'
-    ? `접수일 + ${db.settings.dueDefaultDays}일 자동 계산 — 직접 고치면 그 값이 유지됩니다`
+    ? `${kindInfo(k).basis} + ${dueDaysOf(k)}일 자동 계산 — 직접 고치면 그 값이 유지됩니다`
     : '직접 지정한 기한입니다';
 }
 document.addEventListener('input', e => {
   const el = e.target;
   if(el.dataset.k === 'receivedAt'){
+    const sel = $('#modal-root [data-kind-sel]');
     const due = $('#modal-root [data-k="dueAt"]');
-    if(due && due.dataset.autoDue === '1'){ due.value = addDays(el.value, db.settings.dueDefaultDays); }
+    if(due && due.dataset.autoDue === '1'){ due.value = addDays(el.value, dueDaysOf(sel ? sel.value : '일반')); }
     syncDueField(); return;
   }
   if(el.dataset.k === 'dueAt'){ delete el.dataset.autoDue; syncDueField(); return; }
@@ -1744,6 +1925,11 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const el = e.target;
+  if(el.dataset.kindSel !== undefined){
+    const due = $('#modal-root [data-k="dueAt"]'), rec = $('#modal-root [data-k="receivedAt"]');
+    if(due && due.dataset.autoDue === '1' && rec) due.value = addDays(rec.value, dueDaysOf(el.value));
+    syncKindFields(); syncDueField(); return;
+  }
   if(el.dataset.st !== undefined){
     stats[el.dataset.st] = el.dataset.st === 'months' ? +el.value : el.value;
     render(); return;
