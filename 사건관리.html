@@ -76,7 +76,7 @@ tbody tr.row:hover{background:var(--accent-soft)}
 .pill.kind-j{background:#fdeee6; color:#a8471b}     /* 재수사요청 */
 .empty{padding:34px; text-align:center; color:var(--muted); font-size:13px}
 
-.kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:14px}
+.kpis{display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-bottom:14px}
 .kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; box-shadow:var(--shadow)}
 .kpi .n{font-size:26px; font-weight:800; letter-spacing:-1px; line-height:1.2}
 .kpi .l{font-size:12px; color:var(--muted); font-weight:600}
@@ -199,6 +199,8 @@ tr.dup-row td{background:var(--warn-soft)}
 .legend-row i{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px}
 .kpis5{display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-bottom:14px}
 .kpi .d{font-size:12px; font-weight:700; margin-top:2px}
+.kpi[data-objjump]{cursor:pointer}
+.kpi[data-objjump]:hover{border-color:var(--accent)}
 .kpi .sub{font-size:11px; color:var(--muted)}
 #tip{
   position:fixed; z-index:200; pointer-events:none; opacity:0; transition:opacity .08s;
@@ -249,7 +251,7 @@ tr.dup-row td{background:var(--warn-soft)}
    ══════════════════════════════════════════════════════════════ */
 
 const KEY = 'nambu-team8-case-mgmt-v1';   // 저장 키는 유지(기존 데이터 자동 이관)
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /* ── 수사 진행 단계 ──
    opt:true  = 사건에 따라 거치지 않을 수 있는 선택 단계 (해당없음 처리 가능)
@@ -275,7 +277,7 @@ const TRACK_GENERAL = [
   { n:'사건종합검토 (진술 대조·혐의 판단)',  p:'종결 절차', review:true },
   { n:'추가 수사',                           p:'종결 절차', opt:true },
   { n:'수사결과보고서 작성',                 p:'종결 절차' },
-  { n:'사건당사자 통지',                     p:'종결 절차' },
+  { n:'사건당사자 통지',                     p:'종결 절차', notice:true },
   { n:'종결',                                p:'종결 절차' }
 ];
 /* ── 보완수사요구 사건 (수사실무지침 '보완수사요구 절차 체계도')
@@ -304,7 +306,7 @@ const TRACK_JAESUSA = [
   { n:'추가 조사',                            p:'재수사', opt:true },
   { n:'재수사 결과 검토',                     p:'결과 처리', review:true,
     branch:'결정 취소·변경이면 송치, 결정 유지면 통보 후 검사 송치요구 대기' },
-  { n:'고소인 등 사건관계인 통지',            p:'결과 처리' },
+  { n:'고소인 등 사건관계인 통지',            p:'결과 처리', notice:true },
   { n:'재수사 결과 통보 · 관계서류 송부',     p:'결과 처리' },
   { n:'검사 송치요구 대기 (송부일 + 30일)',   p:'결과 처리', opt:true },
   { n:'종결',                                 p:'결과 처리' }
@@ -351,19 +353,19 @@ const CASE_TYPES = ['고소', '고발', '진정', '인지', '송치전이송', '
 const DISPO_BY_KIND = {
   '일반': [
     { v:'송치',        d:'혐의가 인정되어 공소청 송치' },
-    { v:'불송치',      d:'혐의 없음·죄가 안 됨 등 불송치 결정' },
+    { v:'불송치',      d:'혐의 없음·죄가 안 됨 등 불송치 결정', obj:true },
     { v:'수사중지',    d:'피의자 소재불명 등 중지사유 발생' },
     { v:'타관서 이송', d:'관할이 다른 관서에 있어 이송' }
   ],
   '보완': [
     { v:'이행 완료·결과 통보', d:'요구받은 보완수사를 이행하고 결과를 통보' },
-    { v:'불송치 전환',         d:'보완수사 결과 혐의가 인정되지 않아 불송치로 변경' },
+    { v:'불송치 전환',         d:'보완수사 결과 혐의가 인정되지 않아 불송치로 변경', obj:true },
     { v:'재요구 접수',         d:'이행이 완료되지 않아 검사가 다시 보완수사요구 (새 사건으로 접수)' },
     { v:'수사중지',            d:'소재불명 등으로 보완수사를 계속할 수 없음' }
   ],
   '재수사': [
     { v:'결정 취소·변경 → 송치', d:'재수사 결과 기존 불송치 결정을 취소·변경하여 송치' },
-    { v:'결정 유지 · 불송치 편철', d:'결정을 유지하고 검사가 송치요구를 하지 않아 불송치로 편철' },
+    { v:'결정 유지 · 불송치 편철', d:'결정을 유지하고 검사가 송치요구를 하지 않아 불송치로 편철', obj:true },
     { v:'송치요구에 따른 송치',  d:'결정 유지 후 검사의 송치요구를 받아 결정 변경·송치' },
     { v:'이의신청 → 결정변경·송치', d:'재수사 중 이의신청이 접수되어 재수사를 중단하고 결정 변경·송치' },
     { v:'수사중지',             d:'소재불명 등으로 재수사를 계속할 수 없음' }
@@ -421,7 +423,8 @@ function defaultDb(){
     ],
     cases: [],
     settings: { capTarget:10, capWarn:9, stallDays:14, dueSoonDays:7,
-      dueDefaultDays:60, bowanMonths:1, bowanMaxExt:2, dueJaesusaDays:30 },
+      dueDefaultDays:60, bowanMonths:1, bowanMaxExt:2, dueJaesusaDays:30,
+      objectionMonths:3 },
     lastBackupAt: null
   };
 }
@@ -433,6 +436,7 @@ function migrate(d){
     if(c.kind === undefined) c.kind = '일반';        // 기존 사건은 모두 일반사건
     if(c.origNo === undefined) c.origNo = '';
     if(!Array.isArray(c.extensions)) c.extensions = [];
+    if(c.objFiledAt === undefined){ c.objFiledAt = ''; c.objBy = ''; c.objSentAt = ''; c.objClosedAt = ''; }
     if(c.intakeNo === undefined){ c.intakeNo = c.caseNo || ''; delete c.caseNo; }
     if(!fromV1) return;                              // v2 → v3 은 종류 부여만 하면 된다
     const old = c.stages || [];
@@ -494,6 +498,7 @@ function newCase(kind = '일반'){
     charge: '', type: kind === '보완' ? '결정' : '고소', receivedAt: today(),
     ownerId: db.members[0].id, complainant: '', suspect: '',
     extensions: [],
+    objFiledAt: '', objBy: '', objSentAt: '', objClosedAt: '',
     dueAt: dueFor(kind, today()),
     priority: 'normal', stageIndex: 0, stageEnteredAt: today(),
     stages: TRACKS[kind].map(() => ({ done:false, date:'', skip:false })),
@@ -505,6 +510,7 @@ function newCase(kind = '일반'){
    c.kind 는 이미 새 값으로 설정돼 있어도 된다 */
 function resetTrack(c){
   c.extensions = [];
+  c.objFiledAt = ''; c.objBy = ''; c.objSentAt = ''; c.objClosedAt = '';
   c.stages = TRACKS[kindOf(c)].map(() => ({ done:false, date:'', skip:false }));
   c.stages[0].done = true; c.stages[0].date = c.receivedAt || today();
   c.stageIndex = 0; c.stageEnteredAt = c.receivedAt || today();
@@ -520,6 +526,31 @@ const caseById  = id => db.cases.find(c => c.id === id);
 const loadOf    = id => openCases().filter(c => c.ownerId === id).length;
 
 const stageOf = c => stagesOf(c)[c.stageIndex] || stagesOf(c)[0];
+/* ── 이의신청 기간 (형사소송법 제245조의7) ──
+   불송치로 종결한 사건은 고소인 등이 통지받은 날부터 일정 기간 이의신청을 할 수 있다.
+   이의신청이 있으면 지체 없이 검사에게 사건을 송치해야 하므로, 그 기간과 접수 여부를 추적한다. */
+const dispoOpensObjection = c => (dispoOf(c).find(d => d.v === c.disposition) || {}).obj === true;
+/* 통지일 — 통지 단계를 완료했으면 그 날, 없으면 종결일 */
+function noticeDate(c){
+  const T = stagesOf(c);
+  const i = T.findIndex(x => x.notice);
+  if(i >= 0 && c.stages[i] && c.stages[i].done && c.stages[i].date) return c.stages[i].date;
+  return closedDate(c);
+}
+const objDueDate = c => addMonths(noticeDate(c), db.settings.objectionMonths);
+/* none: 해당 없음 · waiting: 기간 중 · filed: 접수됨(송치 전) · sent: 송치 완료 · expired: 기간 경과 */
+function objState(c){
+  if(!isClosed(c) || !dispoOpensObjection(c)) return 'none';
+  if(c.objSentAt) return 'sent';
+  if(c.objFiledAt) return 'filed';
+  if(c.objClosedAt) return 'expired';
+  const nd = noticeDate(c);
+  if(!nd) return 'none';
+  return (daysBetween(today(), objDueDate(c)) ?? 0) < 0 ? 'expired' : 'waiting';
+}
+const objDays = c => daysBetween(today(), objDueDate(c));
+const OBJ_LABEL = { waiting:'이의신청 기간', filed:'이의신청 접수', sent:'이의신청 송치', expired:'기간 경과' };
+
 const extCount = c => (c.extensions || []).length;
 const canExtend = c => extCount(c) < maxExtOf(kindOf(c));
 /* 기간 연장 — 경찰 신청 또는 검사 직권. 1회에 1월씩, 상한까지만 */
@@ -549,7 +580,11 @@ function dueDays(c){ return (isClosed(c) || !c.dueAt) ? null : daysBetween(today
 
 function caseAlerts(c){
   const out = [], s = db.settings;
-  if(isClosed(c)) return out;
+  if(isClosed(c)){
+    if(objState(c) === 'filed')
+      out.push({ lv:'bad', txt:`이의신청 접수 ${daysSince(c.objFiledAt)}일 — 지체 없이 송치` });
+    return out;
+  }
   const dd = dueDays(c);
   if(dd !== null && dd < 0)                   out.push({ lv:'bad',  txt:`기한 ${-dd}일 경과` });
   else if(dd !== null && dd <= s.dueSoonDays)  out.push({ lv:'warn', txt:`기한 D-${dd}` });
@@ -561,7 +596,7 @@ function caseAlerts(c){
 }
 function allAlerts(){
   const rows = [];
-  openCases().forEach(c => caseAlerts(c).forEach(a => rows.push({ ...a, c })));
+  db.cases.forEach(c => caseAlerts(c).forEach(a => rows.push({ ...a, c })));
   const rank = { bad:0, warn:1 };
   return rows.sort((x, y) => rank[x.lv] - rank[y.lv]);
 }
@@ -658,11 +693,16 @@ function viewDash(){
   const over = db.members.filter(m => m.active && loadOf(m.id) > db.settings.capTarget).length;
 
   const nSub = open.filter(isSub).length;
+  const objWaiting = db.cases.filter(c => objState(c) === 'waiting').length;
+  const objFiled   = db.cases.filter(c => objState(c) === 'filed').length;
   const kpis = `<div class="kpis">
     <div class="kpi"><div class="n">${open.length}</div><div class="l">진행 중 사건</div>
       <div class="sub" style="font-size:11px;color:var(--muted)">일반 ${open.length - nSub} · 보완 등 ${nSub}</div></div>
     <div class="kpi"><div class="n" style="color:${over ? 'var(--bad)' : 'var(--ok)'}">${over}</div><div class="l">${db.settings.capTarget}건 초과 인원</div></div>
     <div class="kpi"><div class="n" style="color:${alerts.length ? 'var(--warn)' : 'var(--ok)'}">${alerts.length}</div><div class="l">점검 필요 항목</div></div>
+    <div class="kpi" data-objjump><div class="n" style="color:${objFiled ? 'var(--bad)' : objWaiting ? 'var(--warn)' : 'var(--ok)'}">${objWaiting + objFiled}</div>
+      <div class="l">이의신청 기간 중</div>
+      <div class="sub" style="font-size:11px;color:var(--muted)">${objFiled ? `<b style="color:var(--bad)">접수 ${objFiled}건</b> · ` : ''}대기 ${objWaiting}건</div></div>
     <div class="kpi"><div class="n">${closedThisMonth}</div><div class="l">이번 달 종결</div></div>
   </div>`;
 
@@ -719,7 +759,7 @@ function viewDash(){
     </div>
   </div>
   <div class="card" style="margin-top:14px">
-    <div class="card-h"><h2>점검 필요 사건</h2><span class="sub">기한 임박 · 단계 정체 ${db.settings.stallDays}일↑ · 팀장 의견 미확인</span></div>
+    <div class="card-h"><h2>점검 필요 사건</h2><span class="sub">기한 임박 · 단계 정체 ${db.settings.stallDays}일↑ · 팀장 의견 미확인 · 이의신청 접수</span></div>
     ${alertRows}
   </div>`;
 }
@@ -734,8 +774,9 @@ const SORT_COLS = [
   { k:'stage',    label:'진행 단계', v:c => c.stageIndex },
   { k:'stall',    label:'단계경과',  v:c => stallDays(c) },
   { k:'due',      label:'기한',     v:c => c.dueAt || '' },
-  { k:'status',   label:'상태',     v:c => isClosed(c) ? 3
-      : caseAlerts(c).some(a => a.lv === 'bad') ? 0 : caseAlerts(c).length ? 1 : 2 }
+  { k:'status',   label:'상태',     v:c => objState(c) === 'filed' ? 0
+      : caseAlerts(c).some(a => a.lv === 'bad') ? 0
+      : objState(c) === 'waiting' ? 1 : caseAlerts(c).length ? 1 : isClosed(c) ? 3 : 2 }
 ];
 /* 값이 없는 행은 정렬 방향과 무관하게 항상 뒤로 보낸다 */
 function comparator(key, dir){
@@ -753,6 +794,7 @@ function filtered(){
   return db.cases.filter(c => {
     if(filters.status === 'open'   && isClosed(c)) return false;
     if(filters.status === 'closed' && !isClosed(c)) return false;
+    if(filters.status === 'obj' && !['waiting', 'filed'].includes(objState(c))) return false;
     if(filters.owner && c.ownerId !== filters.owner) return false;
     if(filters.kind === '보완등' ? !isSub(c) : (filters.kind && kindOf(c) !== filters.kind)) return false;
     if(filters.stage !== '' && c.stageIndex !== +filters.stage) return false;
@@ -786,8 +828,13 @@ function viewList(){
       <td>${st === null ? '-' : `<span class="pill ${st >= db.settings.stallDays ? 'bad' : 'neutral'}">${st}일</span>`}</td>
       <td>${c.dueAt ? `<span class="pill ${dd === null ? 'neutral' : dd < 0 ? 'bad' : dd <= db.settings.dueSoonDays ? 'warn' : 'neutral'}">${fmt(c.dueAt)}${dd === null ? '' : dd < 0 ? ` (${-dd}일↑)` : ` (D-${dd})`}</span>${
         extCount(c) ? `<div class="muted" style="font-size:11px">연장 ${extCount(c)}회</div>` : ''}` : '<span class="muted">-</span>'}</td>
-      <td>${isClosed(c) ? `<span class="pill ok">${esc(c.disposition || '종결')}</span>`
-          : al.length ? `<span class="pill ${al[0].lv}">${esc(al[0].txt)}</span>` : '<span class="pill neutral">정상</span>'}</td>
+      <td>${(() => {
+        const os = objState(c);
+        if(os === 'filed')   return `<span class="pill bad">이의신청 접수 ${daysSince(c.objFiledAt)}일</span>`;
+        if(os === 'waiting') return `<span class="pill warn">이의신청 기간 D-${objDays(c)}</span>`;
+        if(isClosed(c))      return `<span class="pill ok">${esc(c.disposition || '종결')}</span>`;
+        return al.length ? `<span class="pill ${al[0].lv}">${esc(al[0].txt)}</span>` : '<span class="pill neutral">정상</span>';
+      })()}</td>
     </tr>`;
   }).join('') : `<tr><td colspan="7"><div class="empty">해당하는 사건이 없습니다.</div></td></tr>`;
 
@@ -796,6 +843,7 @@ function viewList(){
       <select data-f="status">
         <option value="open"   ${filters.status === 'open' ? 'selected' : ''}>진행 중</option>
         <option value="closed" ${filters.status === 'closed' ? 'selected' : ''}>종결</option>
+        <option value="obj"    ${filters.status === 'obj' ? 'selected' : ''}>이의신청 기간 중</option>
         <option value=""       ${filters.status === '' ? 'selected' : ''}>전체</option></select>
       <select data-f="owner"><option value="">담당자 전체</option>
         ${opts(db.members.filter(m => m.active), filters.owner, m => m.id, m => `${m.rank} ${m.name} (${loadOf(m.id)})`)}</select>
@@ -884,6 +932,17 @@ function renderDetail(){
       : `<span class="muted">없음 (${mx}회까지 가능)</span>`]);
   }
   if(isClosed(c)) info.push(['종결 구분', `<b>${esc(c.disposition || '-')}</b>`]);
+  const os = objState(c);
+  if(os !== 'none'){
+    info.push(['통지일', fmt(noticeDate(c))]);
+    info.push(['이의신청', os === 'filed'
+        ? `<b style="color:var(--bad)">접수 ${fmt(c.objFiledAt)}</b>${c.objBy ? ` <span class="muted">(${esc(c.objBy)})</span>` : ''}`
+      : os === 'sent'
+        ? `<b style="color:var(--ok)">송치 완료 ${fmt(c.objSentAt)}</b>`
+      : os === 'expired'
+        ? `<span class="muted">기간 종료 ${fmt(objDueDate(c))}</span>`
+        : `<b>기간 중</b> <span class="muted">— ${fmt(objDueDate(c))}까지 (D-${objDays(c)})</span>`]);
+  }
 
   $('#modal-root').innerHTML = `<div class="mask" data-close-mask>
     <div class="modal xl" role="dialog">
@@ -909,6 +968,23 @@ function renderDetail(){
               <div style="display:flex;gap:6px;margin-top:6px">
                 <button class="btn sm" data-memo-save>메모 저장</button>
                 <button class="btn ghost sm right" data-del="${c.id}">사건 삭제</button></div>
+              ${os !== 'none' ? `<div style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">
+                <div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">
+                  이의신청 <span style="font-weight:400">— 형사소송법 제245조의7</span></div>
+                ${os === 'waiting' ? `
+                  <div class="pill warn" style="margin-bottom:7px">통지일 ${fmt(noticeDate(c))} + ${db.settings.objectionMonths}개월 → ${fmt(objDueDate(c))} (D-${objDays(c)})</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="btn sm" data-obj="file" data-obj-case="${c.id}">이의신청 접수</button>
+                    <button class="btn ghost sm" data-obj="close" data-obj-case="${c.id}">기간 종료 처리</button></div>`
+                : os === 'filed' ? `
+                  <div class="pill bad" style="margin-bottom:7px">접수 ${fmt(c.objFiledAt)} · ${daysSince(c.objFiledAt)}일 경과 — 지체 없이 검사에게 송치</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="btn sm" data-obj="sent" data-obj-case="${c.id}">송치 완료 처리</button>
+                    <button class="btn ghost sm" data-obj="undo" data-obj-case="${c.id}">접수 취소</button></div>`
+                : os === 'sent' ? `<div class="pill ok">${fmt(c.objSentAt)} 송치 완료</div>`
+                : `<div class="muted" style="font-size:12px">${fmt(objDueDate(c))}자로 이의신청 기간이 끝났습니다.</div>
+                   <button class="btn ghost sm" style="margin-top:6px" data-obj="file" data-obj-case="${c.id}">그래도 접수</button>`}
+              </div>` : ''}
               ${maxExtOf(kindOf(c)) && !isClosed(c) ? `<div style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">
                 <div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">기간 연장</div>
                 ${canExtend(c) ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1326,6 +1402,16 @@ function viewReport(){
             <td><span class="pill ${lv}">${lv === 'bad' ? '목표 초과 — 배당 조정 필요' : lv === 'warn' ? '사건처리 필요' : '여유'}</span></td></tr>`;
         }).join('')}</tbody></table>
       ${byMember.map(({ m, list }) => `<h3>${esc(m.rank)} ${esc(m.name)} — ${list.length}건</h3>${tbl(list)}`).join('')}
+      ${(() => {
+        const objs = db.cases.filter(c => ['waiting', 'filed'].includes(objState(c)))
+          .sort((a, b) => (objDays(a) ?? 0) - (objDays(b) ?? 0));
+        return objs.length ? `<h3>이의신청 기간 중 (${objs.length}건)</h3>
+          <table><thead><tr><th style="width:110px">접수번호</th><th>죄명</th><th style="width:120px">담당</th>
+            <th style="width:90px">통지일</th><th style="width:110px">기간 만료</th><th style="width:150px">상태</th></tr></thead>
+          <tbody>${objs.map(c => `<tr class="row" data-open="${c.id}"><td>${esc(c.intakeNo || '-')}</td><td>${esc(c.charge || '-')}</td>
+            <td>${esc(memberLabel(c.ownerId))}</td><td>${fmt(noticeDate(c))}</td><td>${fmt(objDueDate(c))}</td>
+            <td>${objState(c) === 'filed' ? `접수 ${fmt(c.objFiledAt)} — 송치 필요` : `D-${objDays(c)}`}</td></tr>`).join('')}</tbody></table>` : '';
+      })()}
       ${closedRecent.length ? `<h3>최근 7일 종결 (${closedRecent.length}건)</h3>
         <table><thead><tr><th style="width:110px">접수번호</th><th>죄명</th><th style="width:120px">담당</th>
           <th style="width:90px">접수일</th><th style="width:90px">종결일</th><th style="width:80px">처리기간</th><th style="width:100px">종결 구분</th></tr></thead>
@@ -1739,6 +1825,8 @@ function viewMembers(){
           <label class="f"><span>주의 기준 건수 (이 수부터 노란색)</span><input type="number" data-s="capWarn" value="${s.capWarn}" min="1"></label>
           <label class="f"><span>단계 정체 경보 기준 (일)</span><input type="number" data-s="stallDays" value="${s.stallDays}" min="1"></label>
           <label class="f"><span>기한 임박 경보 기준 (일)</span><input type="number" data-s="dueSoonDays" value="${s.dueSoonDays}" min="1"></label>
+          <label class="f"><span>이의신청 기간 (통지일 + N개월) <span style="font-weight:400">(형소법 §245-7)</span></span>
+            <input type="number" data-s="objectionMonths" value="${s.objectionMonths}" min="1"></label>
           <div style="margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--line)">
             <div class="muted" style="font-size:12px;font-weight:700">사건 종류별 처리기한</div>
             <div class="muted" style="font-size:11px;margin-bottom:9px">
@@ -1789,12 +1877,14 @@ function doBackup(){
   render();
 }
 function doCsv(){
-  const head = ['접수번호','종류','원사건번호','구분','죄명','담당','접수일','처리기한','현재단계','진행률(%)','단계경과(일)','상태','종결구분','고소인','피의자','메모'];
+  const head = ['접수번호','종류','원사건번호','구분','죄명','담당','접수일','처리기한','현재단계','진행률(%)','단계경과(일)','상태','종결구분','이의신청상태','이의신청기간만료','이의신청접수일','고소인','피의자','메모'];
   const lines = [head.join(',')];
   db.cases.forEach(c => lines.push([
     c.intakeNo, kindInfo(kindOf(c)).label, c.origNo || '', c.type, c.charge, memberLabel(c.ownerId), c.receivedAt, c.dueAt,
     `${c.stageIndex + 1}. ${stageOf(c).n}`, progressPct(c), stallDays(c) ?? '',
-    isClosed(c) ? '종결' : '진행', c.disposition, c.complainant, c.suspect, (c.memo || '').replace(/\n/g, ' ')
+    isClosed(c) ? '종결' : '진행', c.disposition,
+    OBJ_LABEL[objState(c)] || '', objState(c) === 'none' ? '' : objDueDate(c), c.objFiledAt || '',
+    c.complainant, c.suspect, (c.memo || '').replace(/\n/g, ' ')
   ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')));
   download(`team8-cases-${today()}.csv`, '﻿' + lines.join('\r\n'), 'text/csv;charset=utf-8');
 }
@@ -1817,7 +1907,7 @@ function doRestore(file){
 
 /* ══════════ 이벤트 ══════════ */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-tab],[data-open],[data-owner],[data-stage],[data-phase],[data-kindjump],[data-act],[data-close],[data-close-mask],[data-edit],[data-del],[data-stage-set],[data-stage-undo],[data-stage-skip],[data-stage-done],[data-note-add],[data-note-del],[data-ack],[data-memo-save],[data-save-case],[data-m-add],[data-m-del],[data-s-save],[data-sort],[data-sort-reset],[data-ext],[data-st-csv],[data-imp-cancel],[data-imp-run],[data-imp-template],[data-dispo],[data-dispo-cancel]');
+  const t = e.target.closest('[data-tab],[data-open],[data-owner],[data-stage],[data-phase],[data-kindjump],[data-objjump],[data-act],[data-close],[data-close-mask],[data-edit],[data-del],[data-stage-set],[data-stage-undo],[data-stage-skip],[data-stage-done],[data-note-add],[data-note-del],[data-ack],[data-memo-save],[data-save-case],[data-m-add],[data-m-del],[data-s-save],[data-sort],[data-sort-reset],[data-ext],[data-obj],[data-st-csv],[data-imp-cancel],[data-imp-run],[data-imp-template],[data-dispo],[data-dispo-cancel]');
   if(!t) return;
   const d = t.dataset;
   const c = openCaseId ? caseById(openCaseId) : null;
@@ -1835,12 +1925,31 @@ document.addEventListener('click', e => {
   if(d.close !== undefined){ openCaseId = null; $('#modal-root').innerHTML = ''; return; }
   if(d.open){ openCaseId = d.open; renderDetail(); return; }
   if(d.owner){ view = 'list'; filters.owner = d.owner; filters.stage = ''; filters.status = 'open'; render(); return; }
+  if(d.objjump !== undefined){ view = 'list'; filters.stage = ''; filters.kind = ''; filters.status = 'obj'; render(); return; }
   if(d.phase){ view = 'list'; filters.stage = ''; filters.kind = '일반'; filters.status = 'open'; render(); return; }
   if(d.kindjump){ view = 'list'; filters.stage = ''; filters.kind = d.kindjump; filters.status = 'open'; render(); return; }
   if(d.stage !== undefined && d.stageSet === undefined && d.stageUndo === undefined
      && d.stageSkip === undefined && d.stageDone === undefined){
     view = 'list'; filters.stage = d.stage; filters.status = 'open'; render(); return; }
 
+  if(d.obj){
+    const t = caseById(d.objCase);
+    if(t){
+      if(d.obj === 'file'){
+        const by = prompt('이의신청인을 입력하세요. (예: 고소인 김○○)', c && c.complainant ? '고소인 ' + c.complainant : '');
+        if(by === null) return;
+        t.objFiledAt = today(); t.objBy = by.trim(); t.objClosedAt = '';
+      }
+      else if(d.obj === 'sent'){ t.objSentAt = today(); }
+      else if(d.obj === 'undo'){ t.objFiledAt = ''; t.objBy = ''; }
+      else if(d.obj === 'close'){
+        if(!confirm('이의신청 없이 기간을 종료 처리할까요?')) return;
+        t.objClosedAt = today();
+      }
+      t.updatedAt = today(); save(); render(); renderDetail();
+    }
+    return;
+  }
   if(d.ext){
     const t = caseById(d.extCase);
     if(t && extendDue(t, d.ext)) { render(); renderDetail(); }
